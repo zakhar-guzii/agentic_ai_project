@@ -20,9 +20,9 @@ class Baseline:
 class Climatology(Baseline):
     """The share of rows followed by a start, per oblast x Kyiv hour, over the last `days` days (None: all history).
 
-    Only rows whose label window had closed by the fit time count (T' + H <= fit time): a later outcome was not
+    Only rows whose label window had closed when the rates are counted (T' + H <= that moment): a later outcome was not
     known yet. Each cell is shrunk to its oblast's mean with SHRINK pseudo-rows, so a sparse or empty cell falls back
-    towards the oblast. Refit every day at 00:00 Kyiv, or once at `asof`.
+    towards the oblast. Nothing is trained: the rates are recounted every day at 00:00 Kyiv, or once at `asof`.
     """
 
     SHRINK = 10
@@ -30,7 +30,7 @@ class Climatology(Baseline):
     def __init__(self, days=28):
         self.days, self.name = days, f"clim{days or 'all'}"
 
-    def fit(self, rows, asof, hours):
+    def rates_at(self, rows, asof, hours):
         """Cell counts per (oblast, hour) and the oblast means, from the rows known at `asof`."""
         y, known = f"y{hours}", rows[rows.ts + pd.Timedelta(hours=hours) <= asof]
         if self.days:
@@ -39,20 +39,20 @@ class Climatology(Baseline):
         return cells, known.groupby("obl")[y].mean(), known[y].mean()
 
     def predict(self, rows, asof=None):
-        """Each row's oblast x hour rate, fitted at 00:00 Kyiv of the row's day, or once at `asof` (rows before
-        `asof` then get NaN: their outcomes are part of that fit)."""
+        """Each row's oblast x hour rate, counted at 00:00 Kyiv of the row's day, or once at `asof` (rows before
+        `asof` then get NaN: their outcomes are in those counts)."""
         midnight = rows.ts.dt.tz_convert("Europe/Kyiv").dt.normalize().dt.tz_convert("UTC")
-        fit_at = midnight if asof is None else pd.Series(asof, index=rows.index)
+        count_at = midnight if asof is None else pd.Series(asof, index=rows.index)
         out = pd.DataFrame(index=rows.index)
         for h in HOURS:
             p = pd.Series(np.nan, index=rows.index)
-            for when, part in rows.groupby(fit_at):
-                cells, mean, overall = self.fit(rows, when, h)
+            for when, part in rows.groupby(count_at):
+                cells, mean, overall = self.rates_at(rows, when, h)
                 key = pd.MultiIndex.from_arrays([part.obl, part.hour.astype(int)])
                 s, n = (cells[c].reindex(key).fillna(0).to_numpy() for c in ("sum", "count"))
                 m = part.obl.map(mean).fillna(overall).to_numpy()
                 p[part.index] = (s + self.SHRINK * m) / (n + self.SHRINK)
-            out[f"{self.name}_{h}"] = p.where(rows.ts >= fit_at)
+            out[f"{self.name}_{h}"] = p.where(rows.ts >= count_at)
         return out
 
 

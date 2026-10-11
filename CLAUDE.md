@@ -77,4 +77,3 @@ Each step gets its own plan before work starts. Decisions and caught errors go t
 - [ ] 7. **Final run.** The untouched holdout and the live-log score; then freeze the results.
 - [ ] 8. **Submission.** README, reflection, AI-log export, a fresh-clone check, and the submission itself.
 
-Rough schedule: steps 1–4 on Sunday, so that the live log runs overnight; steps 5–8 on Monday.

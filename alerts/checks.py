@@ -64,7 +64,7 @@ class AdversarialValidation:
             for side in (first, ~first):
                 t = ts[held & side]
                 near |= ((ts > t.min() - self.gap) & (ts < t.max() + self.gap)).to_numpy()
-            yield ~near, held
+            yield ~near & ~held, held  # with gap = 0, `near` would leave out the block's first and last moments
 
     def _blocks(self, ts):
         """Block number 0 .. k-1 of each row: its moment's place among the set's moments, in time order."""

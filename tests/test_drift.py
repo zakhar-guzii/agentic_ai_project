@@ -23,6 +23,12 @@ def test_folds_hold_a_time_block_of_each_set_and_fit_nothing_within_a_week_of_it
         [f"02-{d:02d}" for d in range(1, 10)] + [f"03-{d}" for d in range(17, 21)]  # 7 days clear of both blocks
 
 
+
+def test_a_held_row_is_never_fitted_even_with_no_gap():
+    a, b = pd.DataFrame({"ts": DAYS("2026-01-01", 40)}), pd.DataFrame({"ts": DAYS("2026-03-01", 20)})
+    for fit, held in AdversarialValidation(COLUMNS, gap=pd.Timedelta(0)).folds(a, b):
+        assert not (fit & held).any() and (fit | held).all()  # with no gap, the fit is every row not held
+
 def sample(seed, start, shift=0.0):
     """4 000 rows every 30 min from `start` (83 days) of four independent N(0, 1) features; `shift` moves "b"."""
     x = pd.DataFrame(np.random.default_rng(seed).normal(size=(4000, 4)), columns=COLUMNS)

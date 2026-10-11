@@ -48,6 +48,7 @@ def test_climatology_uses_nothing_from_t_on():
 import pytest  # noqa: E402
 
 from alerts import data as D  # noqa: E402
+from alerts.model import ForwardRun  # noqa: E402
 from alerts.splits import BENCHMARK, CHOOSE, DECISION  # noqa: E402
 
 need_api = pytest.mark.skipif(not list(D.API_DIR.glob("*/MANIFEST.json")), reason="no alerts.in.ua pull saved yet")
@@ -111,3 +112,29 @@ def test_forward_checks_fit_only_on_labels_known_at_each_block_start(rows):
                 assert held.ts.min() >= a and (held.ts + pd.Timedelta(hours=h)).max() <= b
             block = pd.concat([held.assign(k=k) for k, (_, held) in enumerate(folds)])
             assert (block.groupby("ts").k.nunique() == 1).all()  # a moment is never split between blocks
+
+
+class Constant:
+    """A stub candidate with no model: the run takes seconds and nothing is scored."""
+    name = "const"
+
+    def fit(self, rows, hours, asof):
+        return self
+
+    def predict(self, rows):
+        return np.full(len(rows), 0.5)
+
+
+@need_api
+def test_calibration_follows_decision_4_on_the_real_blocks(rows):
+    run = ForwardRun([Constant()])
+    for h in (1, 3, 6):
+        out = run.run(rows, h, [CHOOSE, BENCHMARK])
+        starts, scored = sorted(out.block.unique()), sorted(out[out.scored].block.unique())
+        assert len(starts) == 10 and scored == starts[2:]  # CHOOSE 1-2 only warm the calibrator up
+        for s in scored:
+            win = run.window(out, s, h)
+            assert win.ts.min() >= s - pd.Timedelta("14D") and (win.ts + pd.Timedelta(hours=h)).max() <= s
+        first = run.window(out, DECISION.bounds["test"][0], h)  # the first benchmark block learns from val forecasts
+        assert starts[6] == DECISION.bounds["test"][0] and first.ts.min() >= DECISION.bounds["val"][0]
+        assert out[out.scored].obl.nunique() == 24

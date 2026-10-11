@@ -430,3 +430,51 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
   - **Before.** `folds()` left out the rows strictly inside (first held moment − gap, last held moment + gap). With gap = 0, the first and last moments of a held block fell outside that zone, so they were both fitted and held: 4 rows in every fold of the test example.
   - **After.** The fit leaves out the held rows explicitly, whatever the gap. The default 7-day gap already covered them (0 such rows), so the reported AUC was not affected.
 - **Tests.** 72 pass: 70 before, plus the two new tests.
+
+## 2026-10-11: step 3 (model and evaluation)
+
+### Wrong #13 (mine, in the plan): "the candidates" were one model type, taken by default
+
+- **Before.** My first step-3 plan compared three variants of the probe's LightGBM plus a blend of clim28 and `RecentLevel`. I presented them as evidence-based, but I had not weighed other model types at all: LightGBM came from the probe, where it was the default.
+- **The user's challenges.**
+  - "Why only LightGBM, without LSTM? Did you weigh what could be best, or pick at random?"
+  - A blend is stacking, and stacking before the correlation of the errors is measured is premature.
+  - CatBoost is worth a look too, and the plan did not save the model weights.
+- **Check** against the survey (research/prior-solutions-scores.csv, 190 repos, and the cards):
+  - gradient boosting appears in 41 repos, deep models (LSTM, GNN) in 17;
+  - the deep results that exist are weak or unfinished: a spatio-temporal GNN at AUC 0.61 with no baseline (anechytailenko); LSTM lost to XGBoost/CatBoost in goodfrog33's 12-model comparison; LSTM on daily minutes at MAPE 75–91% (sergkern1); LSTM unfinished (KrafterDen);
+  - the five strongest onset forecasters (lbgos, maranferij, Ddrakkx, robotheist, Dopplerr24) used LightGBM and/or logistic regression; maranferij's logistic regression matched LightGBM on Brier and lost on ranking;
+  - the numbers across teams are not comparable (targets, windows, often a frozen climatology), so the choice must come from our own CHOOSE blocks, with more than one model type.
+- **After.** Decision 5 below: five candidates of three model types, no blend now, LSTM deferred with its reasons, and the chosen model saved.
+
+### Decision 5: what step 3 compares, how it chooses, and the bar (set before any score)
+
+- **Candidates.** Five, of three model types. Every candidate has fixed settings (no tuning) and uses the same 19 forecast-time features:
+
+  | | Name | Model | Why |
+  |---|---|---|---|
+  | A | `gbm` | LightGBM, the probe's settings | the probe's model |
+  | B | `gbm_clim` | A + the daily clim28 rate as a feature | Decision 3 left this input to step 3 |
+  | C | `gbm_recent` | A with recency weights, half-life 60 days | Wrong #10 left this to step 3; 60 d is lbgos's value, not tuned by us |
+  | D | `catboost` | CatBoost, library defaults, seed 0 | the user: boosted trees of another design (ordered boosting, native categories, strong defaults) |
+  | E | `logistic` | logistic regression; one-hot oblast and weekday, sin/cos hour, log1p and standardised counts | a linear model (Ddrakkx, maranferij) |
+
+  More candidates make the CHOOSE winner look better than it is; the benchmark checks it.
+- **LSTM: considered and deferred.**
+  - No deep model in the survey beat a strong baseline on this task.
+  - Our inputs are tabular features, where boosted trees usually win (Grinsztajn et al., NeurIPS 2022; LightGBM won M5).
+  - About one year and 26k alerts, with a regime shift, is little for a sequence model.
+  - PyTorch and architecture tuning would take the one day left before the deadline.
+- **No stacking or blending now (the user).** A blend helps only if the forecasts err differently, and that has not been measured. The CHOOSE report shows the correlation of the errors (y − p) between the candidates and the baselines. Any blend after that is a new decision, taken before the pre-registration.
+- **Calibration.** Platt (logistic regression on the logit of one forecast, as in the probe) rescales a single model, so it is not a stack. Each block's calibrator follows Decision 4. The report shows raw and calibrated Brier side by side.
+- **Choice rule.** The candidate with the highest mean Brier skill against the daily clim28 over H = 1, 3, 6, on CHOOSE blocks 3–6 pooled. One candidate serves all three horizons.
+- **The bar (the user chose the strict one).**
+  - On the benchmark, the chosen forecaster passes if its Brier skill against the daily clim28 **and** against `RecentLevel` has a 95% Kyiv-day block bootstrap CI above 0, on at least 2 of 3 horizons, pooled over all 24 oblasts.
+  - The bar decides only what we claim. The tool keeps the chosen forecaster whatever the result, because switching models on the benchmark would be tuning on it.
+- **Saved artifacts (the user).**
+  - `models/<chosen>.joblib` holds the forecaster the tool will use. For each H:
+    - the model is fitted on everything known at the map cutoff;
+    - its Platt is fitted on the last 14 days of benchmark forecasts.
+  - Step 4 loads this file. Step 7 scores exactly this file, and its SHA-256 is logged before the holdout is opened.
+  - Every row's forecasts go to `results/{choose,benchmark}_forecasts.csv.gz`, so each reported number can be rechecked without retraining.
+- **Framing claim (the user).** CLAUDE.md said the target "beats a 28-day climatology"; Wrong #9 showed this holds only against a frozen one. CLAUDE.md now says so, and gets the measured result after the benchmark.

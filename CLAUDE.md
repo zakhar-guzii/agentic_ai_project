@@ -11,7 +11,7 @@ It is a Python tool that shows, for every oblast of Ukraine:
 
 It runs as a CLI that prints a table and writes a single HTML page. Every forecast is logged and scored once its window has passed.
 
-**Why this framing.** Our research ([research/](research/)) shows that "a new alert within 1–6 h" is the only target that beats a 28-day climatology on the latest weeks. Daily and "tonight" targets do not beat it. KSE also asks for a usable artifact.
+**Why this framing.** In our feasibility probe ([research/](research/)), "a new alert within 1–6 h" was the only target that beat a 28-day climatology on the latest weeks; daily and "tonight" targets did not. That climatology was frozen at the test start (Wrong #9). Against one recounted daily, and against the 7-day recent level, the gain is small or none, and step 3 measures it. KSE also asks for a usable artifact.
 
 **Brief requirements:**
 - use the most recent data;

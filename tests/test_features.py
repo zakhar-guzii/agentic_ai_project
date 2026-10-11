@@ -1,6 +1,7 @@
+import numpy as np
 import pandas as pd
 
-from alerts.features import AlertGrid, Features
+from alerts.features import AlertGrid, Features, ForecastTable
 
 T = lambda s: pd.Timestamp(s, tz="UTC")
 VOLYN, RIVNE, LVIV = 8, 5, 27  # Volyn borders Rivne and Lviv only
@@ -45,3 +46,41 @@ def test_a_start_exactly_at_t_is_not_seen_at_t():
     for oblast in (LVIV, VOLYN):  # Lviv itself and its neighbour
         assert at(late, "2026-10-01 10:30", oblast).equals(at(WORLD, "2026-10-01 10:30", oblast))
     assert at(late, "2026-10-01 10:31", LVIV).under == 1
+
+
+def row(table, moment, oblast):
+    r = table.rows
+    return r[(r.ts == T(moment)) & (r.obl == oblast)].iloc[0]
+
+
+# Lviv under alert 10:30-10:50, Volyn 11:30-12:00; rows every 30 min from 10:00 to 18:00
+DAY = recs((LVIV, "2026-10-01 10:30", "2026-10-01 10:50"), (VOLYN, "2026-10-01 11:30", "2026-10-01 12:00"))
+
+
+def test_label_is_a_start_in_t_to_t_plus_h():
+    tab = ForecastTable(DAY, T("2026-10-01 10:00"), T("2026-10-01 18:00"))
+    assert row(tab, "2026-10-01 10:30", LVIV).y1 == 1  # a start exactly at T counts
+    volyn = row(tab, "2026-10-01 10:30", VOLYN)
+    assert (volyn.y1, volyn.y3) == (0, 1)  # a start exactly at T + 1 h does not
+
+
+def test_label_past_the_end_of_the_data_is_unknown():
+    tab = ForecastTable(DAY, T("2026-10-01 10:00"), T("2026-10-01 18:00"))
+    assert row(tab, "2026-10-01 15:00", LVIV).y3 == 0  # [15:00, 18:00) ends exactly at the data end
+    late = row(tab, "2026-10-01 15:30", LVIV)
+    assert late.y1 == 0 and np.isnan(late.y3) and np.isnan(late.y6)  # 15:30 + 3 h is past 18:00
+
+
+def test_no_row_for_an_oblast_under_alert_at_t():
+    rows = ForecastTable(DAY, T("2026-10-01 10:00"), T("2026-10-01 18:00")).rows
+    at_noon = set(rows[rows.ts == T("2026-10-01 12:00")].obl)
+    assert VOLYN not in at_noon and LVIV in at_noon  # Volyn is under alert until 12:00
+
+
+def test_hour_and_weekday_are_kyiv_local_across_the_dst_switch():
+    quiet = recs((VOLYN, "2026-03-27 09:00", "2026-03-27 09:30"))
+    rows = ForecastTable(quiet, T("2026-03-29 00:00"), T("2026-03-29 02:00")).rows
+    lviv = rows[rows.obl == LVIV].set_index("ts")
+    assert lviv.loc[T("2026-03-29 00:30"), "hour"] == 2.5  # 02:30 EET
+    assert lviv.loc[T("2026-03-29 01:00"), "hour"] == 4.0  # 04:00 EEST: the clocks jumped an hour
+    assert (lviv.dow == 6).all()  # Sunday

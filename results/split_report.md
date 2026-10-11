@@ -1,5 +1,7 @@
 # What is wrong with the split, and what is already chronological
 
+**Resolution (2026-10-11):** fixed as [PROCESS_LOG, Decision 4](../PROCESS_LOG.md) describes. `Split` and its purge are kept; forecast rows are sorted by time; sequential forecast checks are in `Split.forward`; AV holds out time blocks; all 24 oblasts are evaluated, each with its own counts.
+
 Date: 2026-10-11. This review covers split membership, fold construction, geographic selection, label windows, row order, date choices and evaluation disclosure. Exact pre-cutoff checks are in [split_audit.json](split_audit.json); AV interventions are in [leakage_report.md](leakage_report.md).
 
 ## Direct answer

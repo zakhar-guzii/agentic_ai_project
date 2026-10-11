@@ -357,3 +357,51 @@ The user asked why. Adversarial validation (AV) trains a classifier to tell two 
 - **Geography.** Train-only `>=80%` alert-time exclusion recomputes to IDs 9/22/28 (Dnipropetrovska 89.29%, Kharkivska 81.92%, Donetska 88.47%). Their clear H=6 h val rows number only 21/30/29. Exclusion is a population choice, not an oblast split. Reported 21-region metrics cannot establish accuracy for the promised 24-region tool; the model/evaluation scope must be explicit and consistent.
 - **Seen test.** The September/October period already informed the feasibility research and project scope. It remains a chronological historical benchmark, not an untouched final test. This was disclosed earlier and needs to remain explicit. Val's short duration and combined selection/calibration role also constrain step-3 evaluation; calibrator-fit loss must not be presented as independent validation performance.
 - **Artifacts.** [Clear split review](results/split_report.md), [exact membership/geography checks](results/split_audit.json). No forecast implementation or split dates changed.
+
+## 2026-10-11: split fix requested by the user
+
+### Decision 4: forecast checks in time order, time-blocked AV, all 24 oblasts
+
+- **Request.** The user: the split must be by time, and time must not be mixed. The review above found the primary split already chronological; the AV folds were what mixed time. Four more gaps:
+  - the table was oblast-major;
+  - there were no sequential forecast checks;
+  - one 15-day val was to choose the model and also fit the calibrator;
+  - the reported metrics covered 21 of the 24 regions the tool promises.
+- **Proposal and the user's corrections.** I first proposed replacing `Split` with weekly walk-forward windows. The user kept `Split`, because it is already chronological and purges label windows, and set these rules:
+  - sort by `(ts, obl)` before any time CV, and cut blocks from unique timestamps so the oblasts of a moment stay together;
+  - use separate protocols: sequential checks (train on the past, score the next period) for the forecast, time blocks for AV. `TimeSeriesSplit` cannot be dropped into AV, because its early fits hold one class only;
+  - do not read the endpoint AV (0.749 / 0.892) as a corrected forecast estimate: some of its fits held later dates;
+  - evaluate every region the tool promises, each with its own counts;
+  - keep test as a historical benchmark; the final check is later data after the decisions are frozen. One val for choice and calibration is acceptable, but not as an independent estimate, and calibrated models are compared only on blocks their calibrator did not see;
+  - add no 7-day gap between the main parts: past history in the rolling features is legitimate. The risk of late API revisions is a separate check.
+- **What changed.**
+  - `ForecastTable.rows` is sorted by `(ts, obl)`.
+  - `Split.forward(rows, H, a, b, blocks)` cuts the unique moments in [a, b) into consecutive blocks. A block's fit holds only rows with T + H ≤ its start; its held rows have T + H ≤ b.
+  - `CHOOSE` is six weekly blocks, 2026-08-02 → 09-13; the first two only warm the calibrator up. `BENCHMARK` is four weekly blocks of test.
+  - `AdversarialValidation` cuts each set into 4 time blocks; fold j holds block j of both sets. No fitted row lies within 7 days (`WEEK`, the longest feature window) of a held moment. It reports the AUC per fold and refuses a fold whose fit has under 1,000 rows of a set.
+  - `main.py check` reports AV train vs test.
+- **Contract for step 3**, also in the `forward` docstring:
+  1. A block's model learns only from its `fit`.
+  2. A block's calibrator learns only from out-of-fold forecasts of the 14 days before the block start s, with T + H ≤ s. For the first benchmark block, those are the val forecasts.
+  3. Calibrated candidates are compared only on blocks their calibrator did not see. A calibrator's loss on its own rows is never reported.
+  4. Scores on `CHOOSE` blocks 3–6 (late train and all of val) chose the model, and are labelled as not independent.
+  5. A pre-registration commit (the candidate, and the bar against the daily 28-day climatology and `RecentLevel`) comes before the single benchmark run. Another one comes before the holdout in step 7.
+  6. All 24 oblasts, no exclusions. Every window gets a per-oblast table with n, marked "quality not verified" below n = 100; this rule is set now, before any score.
+- **Results.**
+  - **Tests.** 70 pass. Every test that passed at once was checked by a mutation, and every mutation was caught:
+    - no purge in `forward`'s fit (the real-data test);
+    - `<=` → `<` at the block start;
+    - held labels leaving [a, b);
+    - random AV blocks;
+    - a shift the model cannot see;
+    - `>` → `>=` at the gap edge;
+    - a zero gap.
+  - **Forward blocks on the real rows** (H = 6): 4,310–5,750 held rows each, all 24 oblasts. On 2026-08-04 at 20:30 Kyiv every oblast was under alert, so that moment has no row. The `CHOOSE` blocks after it therefore start at 00:30, not midnight.
+  - **Time-blocked AV, train vs test, 24 oblasts:** AUC **0.946** (folds 0.953 / 0.986 / 0.909 / 0.937). Top features: `nat_starts_3h`, `starts_7d`, `obl`, `alert_min_7d`.
+    - The drift is real, but it is not 0.9995. This is a drift diagnostic, not a forecast estimate.
+    - Train vs val is refused: 15 days cannot hold a block plus a 7-day gap on both sides.
+  - **Frozen audit.** It still reproduces its parts (232,474 / 10,459 / 18,209 rows) in its original oblast-major order.
+- **Separate check: late API revisions.** No split removes this risk: history holds the final record versions, and the truncation checks work on event times.
+  - Step 4: the live log keeps what the API showed at T. When a forecast is scored, features from that snapshot are compared with features from the final history at the same T: the share of differing rows and the effect on Brier.
+  - Step 7: the fresh holdout pull is compared with the 2026-10-11 pull, the only one so far, for records with the same id whose start or end changed.
+  - Until then it stays an open limitation: 183 of 13,885 records were updated more than 60 s after their all-clear.

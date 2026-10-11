@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alerts.model import Boosting, ForwardRun, Platt
+from alerts.features import ForecastTable
+from alerts.model import Boosting, Forecaster, ForwardRun, Logistic, Platt
 from alerts.splits import Split
 
 
@@ -47,3 +48,35 @@ def test_each_block_is_calibrated_on_the_window_before_it():
     assert blocks.p.iloc[:2].isna().all()
     assert blocks.p.iloc[2] == pytest.approx(5 / 9, abs=1e-3)  # days 0-1, but not 23:30 of day 1: its hour ends after s
     assert blocks.p.iloc[3] == pytest.approx(4 / 9, abs=1e-3)  # the first range's days 1-2; day 0 is out of the window
+
+
+def world(seed=0, n=120):
+    """Random 20-minute raion alerts in Volyn, Rivne and Lviv from 28 September to 4 October."""
+    rng = np.random.default_rng(seed)
+    start = pd.Timestamp("2026-09-28", tz="UTC") + pd.to_timedelta(rng.uniform(0, 6 * 86400, n), "s")
+    return pd.DataFrame({"oblast_id": rng.choice([8, 5, 27], n), "level": "raion", "start": start,
+                         "end": start + pd.Timedelta("20min")})
+
+
+def test_a_saved_forecaster_forecasts_the_same_after_loading(tmp_path):
+    first, asof = pd.Timestamp("2026-09-28", tz="UTC"), pd.Timestamp("2026-10-03", tz="UTC")
+    rows = ForecastTable(world(), first, pd.Timestamp("2026-10-04", tz="UTC")).rows
+    run = ForwardRun([Logistic(), Boosting()], split=Split(first, asof, asof, asof), window=pd.Timedelta("1D"))
+    raws = {h: run.run(rows, h, [(pd.Timestamp("2026-09-30", tz="UTC"), asof, 3)]) for h in (1, 3)}
+    later = rows[rows.ts >= asof]
+    for name, forecaster in run.final(rows, raws, asof).items():
+        forecaster.save(tmp_path / f"{name}.joblib")
+        loaded = Forecaster.load(tmp_path / f"{name}.joblib")
+        assert loaded.predict(later).equals(forecaster.predict(later))
+        assert list(loaded.predict(later).columns) == ["p1", "p3"]
+        assert (loaded.meta["train_start"], loaded.meta["asof"]) == (first, asof)
+
+
+def test_final_forecaster_calibrates_only_on_completed_oof_labels():
+    asof = DAY(3)
+    run = ForwardRun([Constant()], split=Split(DAY(0), asof, asof, DAY(4)), window=pd.Timedelta('2D'))
+    raw = run.run(ROWS, 1, [(DAY(0), DAY(4), 4)])
+    final = run.final(ROWS, {1: raw}, asof)['const']
+    # Known rows: 5 + 5 + 4. Calibration days 1-2: 4 positives among 9 completed rows.
+    assert final.meta['counts'][1] == {'fit': 14, 'calibration': 9}
+    assert final.predict(ROWS[ROWS.ts >= asof]).p1.tolist() == pytest.approx([4 / 9] * 5, abs=1e-3)

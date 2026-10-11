@@ -1,4 +1,10 @@
 """The calibrated forecaster: P(an episode starts in [T, T + H)) for each forecast row."""
+import copy
+import importlib.metadata
+import subprocess
+from pathlib import Path
+
+import joblib
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
@@ -13,6 +19,7 @@ from alerts.features import Features
 from alerts.splits import DECISION
 
 CALIBRATION = pd.Timedelta("14D")  # a calibrator learns from the forecasts of the 14 days before its block
+CHOSEN = None  # set in a pre-registration commit, before the historical benchmark is scored
 
 
 class Platt:
@@ -60,13 +67,15 @@ class Boosting:
 
 
 class CatBoost:
-    """CatBoost at its library defaults (seed 0): boosted trees of another design, with ordered boosting and the oblast
-    as a native category."""
+    """CatBoost at its library defaults (seed 0), with the oblast as a native category.
+
+    The library chooses the boosting mode; this is not necessarily ordered boosting.
+    """
 
     name = "catboost"
 
     def fit(self, rows, hours, asof):
-        self.model = CatBoostClassifier(random_seed=0, verbose=0, cat_features=["obl"]).fit(
+        self.model = CatBoostClassifier(random_seed=0, verbose=0, allow_writing_files=False, cat_features=["obl"]).fit(
             rows[Features.NAMES], rows[f"y{hours}"])
         return self
 
@@ -114,7 +123,7 @@ class ForwardRun:
         """The raw-forecast rows a calibrator at s may learn from: s - window <= T and T + H <= s."""
         return raw[(raw.ts >= s - self.window_length) & (raw.ts + pd.Timedelta(hours=hours) <= s)]
 
-    def run(self, rows, hours, ranges):
+    def run(self, rows, hours, ranges, progress=False):
         """The held rows of every block of `ranges` ((a, b, blocks), in time order), with `block` (its start s),
         `scored`, and for each candidate `raw_<name>` and the calibrated `<name>`."""
         held = []
@@ -123,6 +132,8 @@ class ForwardRun:
                 s = part.ts.min()
                 part = part.assign(block=s)
                 for c in self.candidates:
+                    if progress:
+                        print(f"H={hours} block={s} candidate={c.name} fit={len(fit)} held={len(part)}", flush=True)
                     part[f"raw_{c.name}"] = c.fit(fit, hours, s).predict(part)
                 held.append(part)
         raw = pd.concat(held)
@@ -135,3 +146,45 @@ class ForwardRun:
                 platt = Platt().fit(win[f"raw_{c.name}"], win[f"y{hours}"])
                 raw.loc[part.index, c.name] = platt.predict(part[f"raw_{c.name}"])
         return raw
+
+    def final(self, rows, raws, asof):
+        """Fit each candidate for use at `asof`, with a separate model and OOF calibrator per horizon."""
+        result = {}
+        for candidate in self.candidates:
+            models, calibrators, counts = {}, {}, {}
+            for h, raw in sorted(raws.items()):
+                fit = rows[(rows.ts >= self.split.bounds["train"][0]) &
+                           (rows.ts + pd.Timedelta(hours=h) <= asof)]
+                win = self.window(raw, asof, h)
+                models[h] = copy.deepcopy(candidate).fit(fit, h, asof)
+                calibrators[h] = Platt().fit(win[f"raw_{candidate.name}"], win[f"y{h}"])
+                counts[h] = {"fit": len(fit), "calibration": len(win)}
+            commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parent.parent,
+                                    capture_output=True, text=True, check=True).stdout.strip()
+            meta = dict(name=candidate.name, train_start=self.split.bounds["train"][0], asof=asof,
+                        calibration_days=self.window_length / pd.Timedelta("1D"), counts=counts,
+                        features=Features.NAMES + ([f"clim28_{h}" for h in models] if getattr(candidate, "clim", False) else []),
+                        versions={p: importlib.metadata.version(p) for p in
+                                  ("numpy", "pandas", "lightgbm", "catboost", "scikit-learn", "scipy", "joblib")},
+                        git_commit=commit)
+            result[candidate.name] = Forecaster(models, calibrators, meta)
+        return result
+
+
+class Forecaster:
+    """Saved models plus their OOF calibrators. Load only trusted project artifacts (joblib uses pickle)."""
+
+    def __init__(self, models, calibrators, meta):
+        self.models, self.calibrators, self.meta = models, calibrators, meta
+
+    def predict(self, rows):
+        return pd.DataFrame({f"p{h}": self.calibrators[h].predict(model.predict(rows))
+                             for h, model in sorted(self.models.items())}, index=rows.index)
+
+    def save(self, path):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(self, path, compress=3)
+
+    @staticmethod
+    def load(path):
+        return joblib.load(path)

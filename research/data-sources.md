@@ -48,7 +48,7 @@ Status as of **2026-10-10**. I checked the facts below against primary sources: 
 | [JustJimer archive](https://github.com/JustJimer/ukraine-air-alert-stats) of alerts.in.ua | as above, no threats | 2026-09-06 → 2026-10-10 09:50 UTC, synced daily [measured] | CSV on GitHub | none | no license |
 | [api.ukrainealarm.com](https://api.ukrainealarm.com/) (official app API) | State, District, Community; AIR, ARTILLERY, URBAN_FIGHTS, CHEMICAL, NUCLEAR, UNKNOWN; Red/Yellow levels on live alerts | live; `regionHistory` = last ~20–25 alerts only | REST and webhooks | API key via form | not stated (unverified) |
 | [siren.pp.ua](https://github.com/PaulAnnekov/uasiren) proxy | same as the official API | live plus `regionHistory` [measured] | REST | none (50 requests/min) | third-party |
-| map.ukrainealarm.com ranged history (undocumented) | district/city; AIR only; no levels | at least 2025-10-15 → now; 2025-04-10 empty [measured] | JSON with an anonymous page token | none | undocumented; ToS unclear |
+| map.ukrainealarm.com ranged history (undocumented) | district/city/hromada; mostly AIR, but also ARTILLERY, NUCLEAR, URBAN_FIGHTS (corrected 2026-10-11, PROCESS_LOG Wrong #3); no levels | at least 2025-10-15 → now; 2025-04-10 empty [measured] | JSON with an anonymous page token | none | undocumented; ToS unclear |
 | [Kyiv Digital](https://data.kyivcity.gov.ua/dataset/statystyka-povitrianykh-tryvoh-u-misti-kyievi-dep-municipal) | Kyiv city only; level and cause since 2026-09 | weekly JSON 2022-02-28 → 2026-10-04; history API 2022-02-25 → live [measured] | JSON / XML | none | not stated in portal metadata |
 | [air-alarms.in.ua](https://air-alarms.in.ua/) | oblast aggregates | live statistics | web UI only | – | – |
 | Kaggle alert copies | oblast | stale (newest is 2025-07-01), apart from a Kyiv Digital mirror | download | Kaggle account | varies |
@@ -149,7 +149,7 @@ Status as of **2026-10-10**. I checked the facts below against primary sources: 
   - Ongoing alerts have `endDate "0001-01-01T00:00:00"` and `isContinue: true`. Timestamps are UTC.
 - **Official map ([map.ukrainealarm.com](https://map.ukrainealarm.com/)):**
   - Live updates arrive over a Centrifugo WebSocket.
-  - Its date picker calls an undocumented `GET /api/v2/data/mapGetRangedAlerts?startDate=YYYYMMDD&endDate=YYYYMMDD&regionId=<oblast>&apiToken=<token from page HTML>` ([used by ukraine-alarm-pro](https://github.com/ABovsh/ukraine-alarm-pro/blob/main/custom_components/ukraine_alarm_pro/backfill.py)). It returns finished AIR alerts for the region's districts plus the ones currently ongoing, with no levels. **[measured]**
+  - Its date picker calls an undocumented `GET /api/v2/data/mapGetRangedAlerts?startDate=YYYYMMDD&endDate=YYYYMMDD&regionId=<oblast>&apiToken=<token from page HTML>` ([used by ukraine-alarm-pro](https://github.com/ABovsh/ukraine-alarm-pro/blob/main/custom_components/ukraine_alarm_pro/backfill.py)). It returns finished alerts for the region's units plus the ones currently ongoing, with no levels. **[measured]** _Correction 2026-10-11: not AIR only; the snapshot also holds 3,203 ARTILLERY, 12 NUCLEAR and 3 URBAN_FIGHTS rows, so filter on `alertType == "AIR"` (PROCESS_LOG Wrong #3)._
   - For Kyiv it matched Vadimkin to the second on 2026-04-10 and 2025-10-15, and returned data for 2026-09-10. It was **empty** for 2025-04-10 and 2022-03-15/16, dates that do have alerts. The retention is therefore between about 6 and 18 months; the exact figure is **unverified**.
   - It is not an official API, so check terms before relying on it.
 

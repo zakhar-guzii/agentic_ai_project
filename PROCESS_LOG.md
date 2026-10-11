@@ -80,3 +80,107 @@ Check these with raw alerts.in.ua samples before writing any parser:
 - What is the exact `month_ago` window? Does it include standing alerts that started earlier?
 - How does a yellow → red change appear: as an updated record, or as a new one?
 - Do the `location_type` values and the region IDs match the probe's mapping (ukrainealarm state IDs)?
+
+## 2026-10-11: step 1 (data)
+
+### Resource check before planning (11:50–12:30 UTC)
+
+- **map.ukrainealarm.com:** still HTTP 403 with `cf-mitigated: challenge`.
+- **Map snapshot:**
+  - 351 files (27 query ids × 13 chunks), and all SHA-256 hashes match `MANIFEST.json`;
+  - the Luhansk query returned 0 rows;
+  - the last chunks were fetched 19:03:18–19:15:09 UTC, so the **map cutoff is 2026-10-10 19:03 UTC**.
+- **alerts.in.ua:** the token is valid.
+  - `active.json`: 50 active alerts, with `alert_level`, and `threats[]` filled in for 42 of them.
+  - `month_ago` for Kyivska: 1,465 records, starting 2026-09-11 12:21 UTC.
+- **Seam pre-check, real API vs map**, 2026-09-11 → 10-10 19:02:
+
+  | Oblast | Jaccard | Starts (map / API) |
+  |---|---|---|
+  | Kyivska | 0.9995 | 228 / 228 |
+  | Kyiv City | 0.9984 | 212 / 211 |
+
+### Answers to the four open questions (measured)
+
+1. **Does `month_ago` return `threats[]`?** No. History has no `threats` field at all, for either oblast checked. Threat types exist only in `active.json`.
+2. **What is the window?** A rolling 30 days, plus standing alerts that started earlier. For example, Vovchanska hromada has been under alert since 2024-05-20.
+3. **How does yellow → red appear?** As an in-place update of the same record. History keeps only the *final* level.
+   - In JustJimer, no records of the same unit overlap with different levels.
+   - Back-to-back pairs (gap ≤ 60 s) are rare (~1%), and their level pairs are mixed.
+4. **IDs.**
+   - Raion uids match `regions.json`, but the names differ (Берестинський vs Красноградський, apostrophe variants). Join on uid.
+   - **`location_oblast_uid` is not the oblast id:** it holds raion or hromada ids such as 124 and 1293. The oblast must come from the `location_oblast` name.
+   - Kyiv City has `location_type = oblast`.
+   - Kharkiv city is uid 6293, which is not in `regions.json`.
+
+### Wrong #3: "the map endpoint returns AIR alerts only"
+
+- **Before.** data-sources.md §2 and §3.4 say the map returns AIR alerts only.
+- **Check.** Profiling the snapshot found other types:
+
+  | Type | Rows | Level |
+  |---|---|---|
+  | ARTILLERY | 3,203 | all hromada |
+  | NUCLEAR | 12 | 10 raion, 2 hromada |
+  | URBAN_FIGHTS | 3 | hromada |
+
+  The probe's `load_map` never filtered on type, so the 10 raion-level NUCLEAR rows leaked into its oblast union. The effect is negligible, but it is a bug.
+- **Adjustment.** Keep only `alertType == "AIR"`.
+
+### Other data traps found
+
+- **End sentinel.** Ongoing map alerts have the end `0001-01-01T00:00:00`, which overflows pandas unless it is coerced.
+- **Duplicates in the map.** 4,095 duplicate `(unit, start)` rows, all identical. They come from:
+  - 59 ongoing alerts repeated in all 13 chunks;
+  - chunk-boundary days that appear in two files.
+- **Unit levels.** The probe classified unit levels with a regex on names. Use the State/District/Community tree in `regions.json` instead.
+- **Records are final versions.** History records carry the final level and late-filled ends: 60 of 2,371 Kharkiv records were updated more than 1 min after finishing.
+  - Features at T must truncate at T.
+  - Level features may only use alerts that finished before T.
+
+### Decision 2: the data path
+
+- **Proposal.**
+  - Splice at **2026-09-12 00:00 Kyiv (09-11 21:00 UTC)**: map for starts before it, alerts.in.ua for starts after it.
+  - This is better than splicing at the map cutoff:
+    - no map alert that starts before the splice is still open at the cutoff, since the longest is 87.8 h;
+    - the API supplies real levels for the whole post-splice period;
+    - the 29-day overlap is used only for the seam check.
+- **Deduplication at three levels:**
+  - map: on `(unit_id, start)`;
+  - API pulls: on `id`, keeping the latest pull;
+  - between sources: by the splice time.
+- **Storage.** Raw API pulls are saved gzipped, with a MANIFEST (sha256, fetch time, no token). Everything else is rebuilt from raw.
+- **Code.** Written test-first (TDD), at four agreed seams: loaders, splice, episodes, and seam + api.
+- **User decisions:**
+  - commit the raw API pulls;
+  - no Vadimkin 2022–2025 long history, since one year of map data covers the raion reform, the escalation and the level reform.
+- **Acceptance bar, set before running:**
+  - overall seam Jaccard ≥ 0.99;
+  - starts matched within ±2 min ≥ 98% in both directions;
+  - per-oblast Jaccard ≥ 0.97;
+  - splice completeness: no lost or doubled records, ≥ 99% unit-level match after the splice, and Jaccard ≥ 0.99 in the window splice ± 12 h.
+
+### Corrections during implementation
+
+- **Wrong #4 (mine, in the plan): "25 oblast series" should be 24.**
+  - The plan counted 24 oblasts + Kyiv City. Without Luhansk (permanent alert, not fetched) the true count is 23 oblasts + Kyiv City = 24.
+  - feasibility.md and the probe's `OBL` table had it right.
+  - The acceptance bar now reads 24 series and 24/24 API responses.
+- **Zero-length blips.** `load_map` on the real snapshot found 2 records with `end < start`, by 0.7 s and 4.2 s:
+  - Zvenyhorodskyi raion, 2025-10-28;
+  - Rozdilnianskyi raion, 2026-08-13.
+
+  They look like alerts cancelled at once, recorded with clock jitter. `episodes()` drops intervals with length ≤ 0. The bar now reads "`end ≥ start`, except 2 blips under 10 s".
+- **Tests that passed on first run.** Several splice and episode tests passed at once, because the behaviour already followed from the splice rule or the ported `union`.
+  - To show they can fail, each was checked by a mutation, and every mutation was caught:
+    - `>=` → `>` at the splice;
+    - dropping the level filter;
+    - dropping the censoring clip;
+    - `tol_min` 2 → 0.
+  - One mutation looked like a false failure after the code was restored. The cause was a stale `__pycache__`: the mutant was the same size and was written in the same second as the original. Mutation runs now use `PYTHONDONTWRITEBYTECODE=1`.
+- **The minute grid biases the per-oblast seam for quiet oblasts.** The user asked which "shingle" size the Jaccard uses.
+  - It uses (oblast, minute) cells: a minute counts if any part of it is under alert.
+  - On the partial pull, Zakarpattia scored 0.956 on minutes, below the 0.97 bar. It has only 3 alerts and 65 alert-minutes.
+  - The exact overlap in seconds is **0.990**. The API records all-clears 8–17 s later than the map, which pushes ends into the next minute.
+  - **Adjustment.** `compare` now also reports `jaccard_s`, the exact overlap in seconds, which was added test-first. The per-oblast bar (≥ 0.97) is applied to the exact value, and the minute-grid value stays in the report for comparison with feasibility.md. The threshold itself did not change; only the measurement did.

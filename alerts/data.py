@@ -125,7 +125,7 @@ def episodes(records, asof, levels=("oblast", "raion")):
         new = np.r_[True, s[1:] > np.maximum.accumulate(e)[:-1]]
         out.append(pd.DataFrame({"oblast_id": oid, "start": pd.to_datetime(s[new], utc=True),
                                  "end": pd.to_datetime(pd.Series(e).groupby(np.cumsum(new)).max().to_numpy(), utc=True)}))
-    return pd.concat(out, ignore_index=True)
+    return pd.concat(out, ignore_index=True) if out else r[["oblast_id", "start", "end"]]
 
 
 def minute_grid(ep, origin, n_min, oblasts):

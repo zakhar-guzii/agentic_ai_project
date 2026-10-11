@@ -41,3 +41,9 @@ def test_city_and_hromada_rows_are_not_in_the_series():
     r = recs((22, "hromada", "2026-03-10 14:01", None), (22, "city", "2026-10-01 09:00", "2026-10-01 09:20"),
              (22, "raion", "2026-10-01 10:00", "2026-10-01 10:30"))
     assert spans(data.episodes(r, ASOF)) == [[22, T("2026-10-01 10:00"), T("2026-10-01 10:30")]]
+
+
+def test_no_oblast_or_raion_alert_gives_an_empty_table():
+    ep = data.episodes(recs((22, "hromada", "2026-10-01 10:00", "2026-10-01 10:30")), ASOF)
+    full = data.episodes(recs((22, "raion", "2026-10-01 10:00", "2026-10-01 10:30")), ASOF)
+    assert ep.empty and ep.dtypes.equals(full.dtypes)  # same columns and types: callers use .dt on start/end

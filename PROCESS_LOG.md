@@ -237,3 +237,100 @@ A review of 6e980e0..HEAD found three P2 bugs. All 36 tests passed, and none cov
 - **Tests.** 40 pass. Two assertions passed at once, and both were checked by a mutation that was caught:
   - "exactly 2 min still matches" fails when the tolerance is made strict;
   - the dtype check fails when the empty result is an untyped table.
+
+## 2026-10-11: step 2 (features, baselines, splits)
+
+### Decision 3: what step 2 builds
+
+- **Rows.** One per (oblast, T) every 30 min from 2025-10-10 to the map cutoff, only where the oblast is clear at T (no alert in the minute before). Labels `y1`/`y3`/`y6`: an episode start in [T, T + H); NaN when T + H is past the data end.
+- **"The past" means minutes before T.** A record known at T started before T; an end after T is unknown.
+  - Limitation: ends that the server filled in late cannot be checked (60 of 2,371 Kharkiv records were updated more than 1 min after the all-clear).
+- **Restarts within 5 min of an all-clear** (6.3% of episodes) stay separate starts: people hear a new siren. `min_since_alert` carries their risk.
+- **Features: the probe's 18 plus `starts_7d`**, ranked by evidence from research/:
+  1. oblast × Kyiv hour (climatology alone: AUC 0.82–0.90; lbgos "time + oblast" = 0.162 of 0.278 skill);
+  2. own load and recency (lbgos +0.055; top gain in the probe);
+  3. neighbours (lbgos +0.036; a neighbour siren preceded 94% of episodes);
+  4. the national wave (lbgos +0.001), kept because it is in the probe's set.
+
+  The 28-day climatology at T is a candidate input; step 3 decides it on val. Out: text (Decision 1), yellow/red levels (below), weather, holidays, ISW.
+- **Yellow/red levels (user's decision): logged, not forecast.** Levels exist only since the splice (about 30 days), the map has none, and history keeps only each record's final level. The forecast is "any alert"; the live log in step 4 stores the current levels and threats with every forecast.
+- **Baselines** (`alerts/baselines.py`). Nothing is trained; each counts rates from rows whose label window had closed:
+  - `Climatology(28)`: oblast × Kyiv hour over the last 28 days, shrunk to the oblast mean with 10 pseudo-rows, recounted every day at 00:00 Kyiv. The main bar.
+  - `Climatology(None)`: the same over all history, to show the cost of a regime change.
+  - `RecentLevel`: a constant hazard from the last 7 days (starts / clear minutes), i.e. the two-state Markov chain.
+  - `Persistence`: 1 if a start came in the last H hours.
+- **Splits** (`alerts/splits.py`, `DECISION`), Kyiv dates. A row belongs to a part [a, b) only if a ≤ T and T + H ≤ b (purge).
+
+  | Part | Window | Role |
+  |---|---|---|
+  | train | 2025-11-15 → 2026-08-29 | fitting; starts after raion-level alerts reached every oblast |
+  | val | 2026-08-29 → 2026-09-13 | every step-3 decision and the calibration |
+  | test | 2026-09-13 → map cutoff | reported as seen by the probe; nothing is tuned on it |
+
+  The holdout after the map cutoff is step 7.
+- **Code as classes** (user's decision), new code only: `AlertGrid`, `Features`, `ForecastTable`, `Split`, `Baseline` and its three kinds, `TruncationCheck`, `AdversarialValidation`. Step-1 code stays as functions.
+
+### Why leakage is tested by truncation and not by adversarial validation
+
+The user asked why. Adversarial validation (AV) trains a classifier to tell two sets of rows apart; it measures drift between their feature distributions. A feature that sees the future can have the same distribution in both sets, so AV can pass it. `TruncationCheck` tests the brief's rule directly: it computes a quantity from all records and from the records as known at T, and requires exact equality. A planted leak (features at T + 1 min) is caught, and so is a climatology that counts a row before its label window closed. AV stays as a drift diagnostic (below).
+
+### Wrong #9: "the model beats a 28-day climatology by +0.12 / +0.15 / +0.18"
+
+- **Before.** feasibility.md §3 and CLAUDE.md: LightGBM + Platt has Brier skill +0.12 / +0.15 / +0.18 against a 28-day climatology on 2026-09-13 → 10-10.
+- **Check.** In the probe the climatology is counted once, at the test start, and then frozen for 27 days (`research/probe/model.py:162-163`). By the end of the window it is up to 55 days old, while the alert load kept rising.
+- **Result** on the same window and the same 21 oblasts (Brier; skill against the daily climatology):
+
+  | H | Base rate | Persistence | Clim. 28 d frozen (probe) | **Clim. 28 d daily** | Clim. all history | Recent level 7 d | Probe's LightGBM + Platt |
+  |---|---|---|---|---|---|---|---|
+  | 1 h | 0.235 | 0.2366 | 0.1439 (−0.07) | **0.1346** | 0.1703 (−0.27) | 0.1318 (+0.02) | 0.127 |
+  | 3 h | 0.414 | 0.2703 | 0.1652 (−0.13) | **0.1458** | 0.2175 (−0.49) | 0.1413 (+0.03) | 0.141 |
+  | 6 h | 0.531 | 0.2491 | 0.1598 (−0.19) | **0.1339** | 0.2153 (−0.61) | 0.1285 (+0.04) | 0.131 |
+
+  - Against a climatology recounted daily, the probe's model is only about +0.06 / +0.03 / +0.02 (its numbers come from the probe's own run, so this is approximate).
+  - The 7-day recent level, which has no model at all, is as good as the probe's model at 3 h and better at 6 h.
+- **Adjustment.**
+  - The honest bar is the daily climatology, and the recent level must be reported next to it.
+  - The step-3 pre-registered bar has to name the bar explicitly.
+  - The claim in CLAUDE.md ("beats a 28-day climatology") needs the user's decision before step 3.
+
+### Step 2 result (2026-10-11 ~17:30 Kyiv)
+
+- **Reproduction of the probe** (acceptance test, bar set in the plan before the run). Every bar is met:
+
+  | | Probe | Ours | Bar |
+  |---|---|---|---|
+  | Clear rows | 18,214 | 18,209 | ±1% |
+  | Base rate 1 / 3 / 6 h | 0.234 / 0.414 / 0.531 | 0.235 / 0.414 / 0.531 | ±0.005 |
+  | Brier persistence | 0.237 / 0.270 / 0.249 | 0.237 / 0.270 / 0.249 | ±0.005 |
+  | Brier clim. 28 d, frozen | 0.144 / 0.165 / 0.160 | 0.144 / 0.165 / 0.160 | ±0.003 |
+
+- **Leakage on the real history.** Features and the 28-day climatology are identical with the data cut at T, at 30 moments. These are 23 random moments, plus:
+  - an episode start;
+  - 1 and 2 min after an all-clear;
+  - inside an alert longer than 24 h;
+  - both DST switches;
+  - the splice.
+
+  No train label window reaches val, and no val window reaches test, for any H.
+- **Is the test window adequate?** Size and regime per part (21 oblasts, H = 6 h purge for the row counts):
+
+  | Part | Rows | Base rate 1 / 3 / 6 h | Share of time under alert | Starts per oblast-day |
+  |---|---|---|---|---|
+  | train | 232,474 | 0.102 / 0.224 / 0.329 | 0.194 | 2.53 |
+  | val | 10,459 | 0.193 / 0.363 / 0.465 | 0.301 | 4.53 |
+  | test | 18,209 | 0.236 / 0.415 / 0.531 | 0.343 | 5.58 |
+
+  Test is the latest and most intense regime, as the brief asks. It is almost entirely alerts.in.ua data, which step 1 validated on this very window (Jaccard 0.9994).
+- **Adversarial validation** (LightGBM, 5-fold, features only):
+  - train vs val: AUC **0.999**; top drifting features `starts_7d`, `alert_min_7d`, `obl`, `nat_starts_3h`;
+  - train vs test: AUC **1.000**; top features `nat_starts_3h`, `starts_7d`, `obl`, `alert_min_7d`.
+
+  The periods are almost perfectly separable, mostly by the load features. Part of this comes from 7-day features being smooth in time, which random folds reward. The direction is clear all the same: training on all history unweighted will lag the regime. This is the input for the open step-3 question on recency weighting.
+- **Corrections during implementation.** During a mutation run, `git checkout` restored a file from an index that did not hold the latest edit (the `asof` guard). The `asof` test failed at once, and the edit was redone. Mutation runs now stage the green state first.
+- **Tests.** 65 pass: 40 from step 1 plus 25 new. Every test that passed at once was checked by a mutation that was caught:
+  - the minute-before rule;
+  - the purge;
+  - the label-maturity rule (×2);
+  - the refit at midnight;
+  - the 28-day window;
+  - `known_at` cutting at T.

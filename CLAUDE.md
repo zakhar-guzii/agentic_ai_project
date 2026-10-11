@@ -49,6 +49,10 @@ KSE grades the process. The AI log is their primary signal.
 **Code:**
 - `alerts/api.py`: the alerts.in.ua client, with a paced, resumable history pull.
 - `alerts/data.py`: `load_map`, `load_api` → `history` (the splice) → `episodes` (per-oblast union, censored at `asof`) → `minute_grid`. Also `compare`, `daily_agreement` and `unmatched` for the seam checks.
+- `alerts/features.py`: `AlertGrid` (per-oblast minute grid; a query for T reads minutes before T only) → `Features` → `ForecastTable` (30-min rows where the oblast is clear at T, labels `y1`/`y3`/`y6`).
+- `alerts/splits.py`: `Split` with the purge; `DECISION` = train / val / test.
+- `alerts/baselines.py`: `Climatology(28 | None)` (recounted daily), `RecentLevel`, `Persistence`. Nothing is trained.
+- `alerts/checks.py`: `TruncationCheck` (leakage) and `AdversarialValidation` (drift).
 - `main.py`: the CLI. `fetch` pulls history (network). `check` builds the history and writes `results/data_report.md` (offline).
 - `tests/`: pytest. There is one file per seam; `test_real_data.py` holds the acceptance bar on the real data.
 - The probe in [research/probe/](research/probe/) is a frozen research record. Do not edit it.
@@ -69,7 +73,7 @@ KSE grades the process. The AI log is their primary signal.
 Each step gets its own plan before work starts. Decisions and caught errors go to [PROCESS_LOG.md](PROCESS_LOG.md).
 
 - [x] 1. **Data.** Build the alert history from the map snapshot plus alerts.in.ua: clean it, build per-oblast alert series, and check the seam between the sources. Seam Jaccard 0.9994; report in `results/data_report.md`.
-- [ ] 2. **Features and baselines.** Forecast-time features computed only from the past, climatology and persistence baselines, and leakage tests.
+- [x] 2. **Features and baselines.** Forecast-time features computed only from the past, climatology and persistence baselines, and leakage tests. Probe reproduced; leakage tests pass on 30 real moments. Wrong #9: against a daily-recounted 28-day climatology the probe's model gains only about +0.02 to +0.06, and the 7-day recent level is as strong (PROCESS_LOG).
 - [ ] 3. **Model and evaluation.** The calibrated 1/3/6 h forecaster, scored on the latest period against the baselines.
 - [ ] 4. **Live forecast.** `predict` from alerts.in.ua, a log of every forecast, and its scoring.
 - [ ] 5. **History analytics.** Alert load over time, and the yellow/red levels since the reform.

@@ -325,7 +325,7 @@ The user asked why. Adversarial validation (AV) trains a classifier to tell two 
   - train vs val: AUC **0.999**; top drifting features `starts_7d`, `alert_min_7d`, `obl`, `nat_starts_3h`;
   - train vs test: AUC **1.000**; top features `nat_starts_3h`, `starts_7d`, `obl`, `alert_min_7d`.
 
-  The periods are almost perfectly separable, mostly by the load features. Part of this comes from 7-day features being smooth in time, which random folds reward. The direction is clear all the same: training on all history unweighted will lag the regime. This is the input for the open step-3 question on recency weighting.
+  These random-fold scores combine real load drift with temporal dependence between fitting and held rows. The follow-up audit below finds substantial inflation: they do not prove independent-period separability or that every model trained on all history without weights will lag. Recency weighting remains a step-3 hypothesis to compare on chronological val.
 - **Corrections during implementation.** During a mutation run, `git checkout` restored a file from an index that did not hold the latest edit (the `asof` guard). The `asof` test failed at once, and the edit was redone. Mutation runs now stage the green state first.
 - **Tests.** 65 pass: 40 from step 1 plus 25 new. Every test that passed at once was checked by a mutation that was caught:
   - the minute-before rule;
@@ -334,3 +334,26 @@ The user asked why. Adversarial validation (AV) trains a classifier to tell two 
   - the refit at midnight;
   - the 28-day window;
   - `known_at` cutting at T.
+
+## 2026-10-11: leakage and AV follow-up requested by the user
+
+### Wrong #10: interpreting near-perfect random-fold AV as independent-period drift
+
+- **Question.** Check whether train/val AV 0.999 and train/test AV 1.000 come from data leakage, and identify the cause.
+- **Reproduction.** Fixed step-2 settings and 21 oblasts reproduce AUC 0.999400 / 0.999501. The latter rounds to 1.000; it is not exact perfect classification.
+- **Cause.** Individual random folds mix strongly dependent temporal context: 99.993% of held rows share a timestamp with fit, and about 93.5–93.7% have a same-oblast ±30-minute neighbour in fit. Rolling load and national wave features provide a fingerprint of the recorded interval. Grouping timestamps still gives 0.998031 / 0.998459; removing only the two 7-day features still gives 0.992471 / 0.993831. The dependence extends to shorter windows and national aggregates.
+- **Countercheck.** Holding first/last complete 3-day blocks of each compared period gives pooled AV 0.849 / 0.911 without a gap and 0.749 / 0.892 with a 7-day gap. These are sensitivity diagnostics over the same endpoint rows, not full-period OOF scores or forward forecast metrics. The gap also reduces fit size; individual fold scores and limits are in the report.
+- **Other hypotheses.** Event-time feature/climatology truncation and horizon purges pass; the planted future-feature leak is caught. Using the map throughout gives train/test AV 0.999515, so the source splice is not necessary for the effect. Only oblast/hour/weekday gives 0.515 / 0.542.
+- **Residual risk.** Final history versions do not establish field availability at T. Of 13,885 completed API AIR oblast/raion records before cutoff (all 24 oblasts), 183 were updated >60 s after finishing. This marks a publication/revision risk, not proof that each update changed an end. `known_at` cannot check it without timestamped live/version snapshots.
+- **Adjusted conclusion.** Rising load is confirmed independently (starts per oblast-day 2.53 → 4.53 → 5.58), but the AV scores overstate evidence of generalization difficulty. Whether a particular all-history model lags, and whether recency weights help, must be tested on chronological val. No model choice was made on test; the post-cutoff holdout was not scored.
+- **Artifacts.** [Full report](results/leakage_report.md), [offline reproduction](results/audit_leakage.py), [exact results](results/leakage_audit.json). Existing diagnostic tests: **9 passed**, one joblib CPU-detection warning. Forecast implementation unchanged.
+
+### Follow-up: which split actually mixes time, and why these dates and oblasts?
+
+- **Primary split.** `Split.rows` filters by T and `T + H <= boundary`, with shared dates for all oblasts. Real checks over all 24 series find no shared timestamps between parts and no label-window crossings for 1/3/6 h. Synthetic split checks: **2 passed**. This split already satisfies chronological membership.
+- **Random folds.** The auxiliary AV uses shuffled stratified row folds over the two periods. Its fits can include later times than a held row. The previous endpoint experiments also permit later fitted dates and are sensitivity diagnostics, not forward forecast validation. Turning off shuffle alone does not fix either protocol.
+- **Order.** `ForecastTable` is oblast-major; each part is not globally sorted by time. Its existing timestamp filters remain correct. Future index-based chronological CV must sort by `(ts, obl)` and keep equal timestamps together.
+- **Dates.** The snapshot's last first-observed raion series is Ternopilska on 2025-11-06 09:07 UTC, supporting the November-15 start and full trailing windows. August-29/September-13 come from the probe's hard-coded test start and its 15-day dev interval; they are not geographic balancing rules.
+- **Geography.** Train-only `>=80%` alert-time exclusion recomputes to IDs 9/22/28 (Dnipropetrovska 89.29%, Kharkivska 81.92%, Donetska 88.47%). Their clear H=6 h val rows number only 21/30/29. Exclusion is a population choice, not an oblast split. Reported 21-region metrics cannot establish accuracy for the promised 24-region tool; the model/evaluation scope must be explicit and consistent.
+- **Seen test.** The September/October period already informed the feasibility research and project scope. It remains a chronological historical benchmark, not an untouched final test. This was disclosed earlier and needs to remain explicit. Val's short duration and combined selection/calibration role also constrain step-3 evaluation; calibrator-fit loss must not be presented as independent validation performance.
+- **Artifacts.** [Clear split review](results/split_report.md), [exact membership/geography checks](results/split_audit.json). No forecast implementation or split dates changed.

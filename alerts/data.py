@@ -96,12 +96,19 @@ def history(map_recs, api_recs):
 
 
 def unmatched(map_recs, api_recs, lo, hi, tol="60s"):
-    """Records starting in [lo, hi) that have no record for the same unit within `tol` in the other source."""
+    """Records starting in [lo, hi) with no counterpart for the same unit in the other source: no start within
+    `tol`, and no record covering them (the map keeps overlapping records for one raion, alerts.in.ua one)."""
+    tol = pd.Timedelta(tol)
+
     def missing(a, b):
         a = a[(a.start >= lo) & (a.start < hi)].sort_values("start")
-        b = b[["unit_id", "start"]].sort_values("start").assign(hit=True)
-        m = pd.merge_asof(a, b, on="start", by="unit_id", tolerance=pd.Timedelta(tol), direction="nearest")
-        return a[m.hit.isna().to_numpy()]
+        bb = b[["unit_id", "start"]].sort_values("start").assign(hit=True)
+        hit = pd.merge_asof(a, bb, on="start", by="unit_id", tolerance=tol, direction="nearest").hit.notna().to_numpy()
+        a_end, b_end = a.end.fillna(hi), b.end.fillna(hi)
+        for i, r in enumerate(a.itertuples()):
+            if not hit[i]:
+                hit[i] = ((b.unit_id == r.unit_id) & (b.start <= r.start + tol) & (b_end >= a_end.iloc[i] - tol)).any()
+        return a[~hit]
     return pd.concat([missing(map_recs, api_recs), missing(api_recs, map_recs)], ignore_index=True)
 
 

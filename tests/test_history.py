@@ -61,3 +61,11 @@ def test_alert_present_in_only_one_source_is_reported_not_silently_lost():
     u = data.unmatched(m, a, lo, hi)
     assert u[["src", "unit_id", "start"]].values.tolist() == [["map", 77, T("2026-09-21 10:00")],
                                                                ["api", 78, T("2026-09-22 10:00")]]
+
+
+def test_map_record_nested_inside_an_api_record_is_not_unmatched():
+    lo, hi = T("2026-09-12 00:00"), T("2026-10-10 19:00")
+    # the map keeps overlapping records for one raion; alerts.in.ua keeps one record covering them
+    m = recs("map", (76, "2026-09-20 21:33:03", "2026-09-21 00:42:18"), (76, "2026-09-20 23:19:03", "2026-09-21 00:40:39"))
+    a = recs("api", (76, "2026-09-20 21:33:04", "2026-09-21 00:42:26"))
+    assert data.unmatched(m, a, lo, hi).empty

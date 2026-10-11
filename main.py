@@ -76,8 +76,8 @@ def check(args):
                "`jaccard_s` is exact, in seconds. `a_in_b`: share of map episode starts with an API start within +-2 min.")
     corr, mae = D.daily_agreement(mc, ac, D.SPLICE, D.MAP_CUTOFF)
     out.append(f"\nDaily alert-minutes per (oblast, Kyiv day), full days only: correlation {corr:.4f}, MAE {mae:.1f} min.")
-    out.append(f"\nUnit level (same raion uid, |dstart| <= 60 s): map raion records without an API match "
-               f"{(um.src == 'map').sum()} of {nm}; API without a map match {(um.src == 'api').sum()} of {na}.")
+    out.append(f"\nUnit level (same raion uid; a start within 60 s, or a record of the other source covering it): map raion records without a counterpart "
+               f"{(um.src == 'map').sum()} of {nm}; API without one {(um.src == 'api').sum()} of {na}.")
     if len(um):
         out.append("\nUnmatched records:\n\n" + md(um[["src", "oblast_id", "unit_id", "unit", "start", "end"]].set_index("src")))
     # splice completeness

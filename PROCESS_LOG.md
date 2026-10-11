@@ -216,3 +216,24 @@ Check these with raw alerts.in.ua samples before writing any parser:
 - **Manual spot check.** 3 random API raion records were found in the raw map JSON: starts within 1 s, ends within 0.4 s to 2 min.
 - **Tests.** 36 pass: 30 written test-first, plus the acceptance tests in `test_real_data.py`.
 - **For step 2.** 6.3% of episodes (1,651 of 26,128) restart within 5 min of an all-clear.
+
+### Code review of step 1 (2026-10-11)
+
+A review of 6e980e0..HEAD found three P2 bugs. All 36 tests passed, and none covered them. Each was reproduced on a worked example and then fixed test-first.
+
+- **Wrong #6: the token was masked after the error body was cut to 300 chars.**
+  - **Before.** When the token crossed char 300, its first chars stayed in the error message: a body of 295 chars + the token left `secre` behind.
+  - **After.** `get()` masks the token first and then cuts the body.
+- **Wrong #7 (my metric): "starts matched within ±2 min" was counted on the minute grid.**
+  - **Before.** Binning to minutes widened the tolerance to almost 3 min: starts 2 min 30 s apart counted as a match. Starts in the same minute were also counted as one.
+  - **After.** `compare` matches exact episode start times with `merge_asof`, as `unmatched` already does. It also counts episodes rather than minutes.
+  - **Seam, before → after:**
+    - starts (map / API): 3,726 / 3,722 → 3,727 / 3,723;
+    - matched: 99.76% / 99.84% → 99.73% / 99.84%.
+
+    The ≥ 98% bar still holds, and the splice window ± 12 h is unchanged (110 vs 110). Only Odeska (18) and Chernihivska (25) changed; Chernihivska map → API went from 0.989 to 0.983.
+- **Wrong #8: `episodes()` crashed when no oblast or raion record was left** (`pd.concat` of nothing).
+  - **After.** It returns an empty table with the same columns and types, so callers can still use `.dt`.
+- **Tests.** 40 pass. Two assertions passed at once, and both were checked by a mutation that was caught:
+  - "exactly 2 min still matches" fails when the tolerance is made strict;
+  - the dtype check fails when the empty result is an untyped table.

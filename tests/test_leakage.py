@@ -48,8 +48,8 @@ def test_climatology_uses_nothing_from_t_on():
 import pytest  # noqa: E402
 
 from alerts import data as D  # noqa: E402
-from alerts.model import ForwardRun  # noqa: E402
-from alerts.splits import BENCHMARK, CHOOSE, DECISION  # noqa: E402
+from alerts.model import Boosting, CatBoost, ForwardRun, Logistic  # noqa: E402
+from alerts.splits import BENCHMARK, CHOOSE, DECISION, Split  # noqa: E402
 
 need_api = pytest.mark.skipif(not list(D.API_DIR.glob("*/MANIFEST.json")), reason="no alerts.in.ua pull saved yet")
 
@@ -138,3 +138,42 @@ def test_calibration_follows_decision_4_on_the_real_blocks(rows):
         first = run.window(out, DECISION.bounds["test"][0], h)  # the first benchmark block learns from val forecasts
         assert starts[6] == DECISION.bounds["test"][0] and first.ts.min() >= DECISION.bounds["val"][0]
         assert out[out.scored].obl.nunique() == 24
+
+
+# A forward run over the synthetic world: rows from 30 September, daily blocks from 1 October, a 1-day window.
+FIRST, BLOCKS_FROM = T("2026-09-30 00:00"), T("2026-10-01 00:00")
+SMALL = Split(FIRST, END, END, END)
+# moments in the scored blocks: block starts and half past, where a leak from the hour before would show, and a later one
+SCORED = [T("2026-10-02 00:00"), T("2026-10-02 00:30"), T("2026-10-03 00:00"), T("2026-10-03 21:30")]
+# the synthetic world plus a start 10 min after a block start in Zakarpattia, clear until then: the 23:30 row before it
+# has y1 = 1, which nobody knew at the block start
+SHARP = pd.concat([WORLD, pd.DataFrame({"oblast_id": [11], "level": ["raion"], "start": [T("2026-10-02 00:10")],
+                                                "end": [T("2026-10-02 00:40")]})], ignore_index=True)
+
+
+def forecasts(run):
+    """compute(records, T) for TruncationCheck: the calibrated forecasts of `run` at T. Like a forecaster at T, the run
+    stops with the block that holds T: later blocks would calibrate on labels nobody has yet."""
+    def at(records, moment):
+        rows = ForecastTable(records, FIRST, END).rows
+        rows = rows.join(Climatology(28).predict(rows))  # the clim28 feature of gbm_clim
+        days = (moment.floor("D") - BLOCKS_FROM).days + 1
+        out = run.run(rows, 1, [(BLOCKS_FROM, BLOCKS_FROM + pd.Timedelta(days=days), days)])
+        return out.loc[out.ts == moment, ["obl"] + [c.name for c in run.candidates]].reset_index(drop=True)
+    return at
+
+
+@pytest.mark.parametrize("candidate", [Boosting(), Boosting(clim=True), Boosting(half_life=60), CatBoost(), Logistic()],
+                         ids=lambda c: c.name)
+def test_a_calibrated_forecast_uses_nothing_from_t_on(candidate):
+    run = ForwardRun([candidate], split=SMALL, window=pd.Timedelta("1D"))
+    assert TruncationCheck(SHARP).mismatches(forecasts(run), SCORED) == []
+
+
+def test_a_calibrator_fitted_on_unfinished_labels_is_caught():
+    class Unpurged(ForwardRun):
+        def window(self, raw, s, hours):  # the planted leak: rows whose label window runs past s
+            return raw[(raw.ts >= s - self.window_length) & (raw.ts < s)]
+
+    caught = TruncationCheck(SHARP).mismatches(forecasts(Unpurged([Boosting()], SMALL, pd.Timedelta("1D"))), SCORED)
+    assert T("2026-10-02 00:00") in caught, "the check did not bite"

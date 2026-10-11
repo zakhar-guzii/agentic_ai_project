@@ -1,8 +1,15 @@
 """The calibrated forecaster: P(an episode starts in [T, T + H)) for each forecast row."""
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from catboost import CatBoostClassifier
+from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 
+from alerts.checks import AdversarialValidation
+from alerts.features import Features
 from alerts.splits import DECISION
 
 CALIBRATION = pd.Timedelta("14D")  # a calibrator learns from the forecasts of the 14 days before its block
@@ -25,6 +32,9 @@ class Platt:
         return np.log(q / (1 - q)).reshape(-1, 1)
 
 
+# A candidate forecaster has a `name`, `fit(rows, hours, asof)` on rows whose labels were known at `asof`, and
+# `predict(rows)`, the raw probability of a start within `hours`. Settings are fixed: nothing is tuned.
+
 class Boosting:
     """LightGBM at the probe's fixed settings. `clim` adds the daily clim28 rate as a feature; `half_life` (days) weights
     each row by its age at the fit moment, so that recent weeks count more."""
@@ -38,6 +48,54 @@ class Boosting:
         if self.half_life:
             return 0.5 ** ((asof - ts) / pd.Timedelta(days=self.half_life)).to_numpy()
         return None
+
+    def fit(self, rows, hours, asof):
+        self.columns = Features.NAMES + [f"clim28_{hours}"] * self.clim
+        self.model = lgb.LGBMClassifier(**AdversarialValidation.SETTINGS).fit(
+            rows[self.columns], rows[f"y{hours}"], sample_weight=self.weights(rows.ts, asof), categorical_feature=["obl"])
+        return self
+
+    def predict(self, rows):
+        return self.model.predict_proba(rows[self.columns])[:, 1]
+
+
+class CatBoost:
+    """CatBoost at its library defaults (seed 0): boosted trees of another design, with ordered boosting and the oblast
+    as a native category."""
+
+    name = "catboost"
+
+    def fit(self, rows, hours, asof):
+        self.model = CatBoostClassifier(random_seed=0, verbose=0, cat_features=["obl"]).fit(
+            rows[Features.NAMES], rows[f"y{hours}"])
+        return self
+
+    def predict(self, rows):
+        return self.model.predict_proba(rows[Features.NAMES])[:, 1]
+
+
+def _hour_circle(hour):
+    """Kyiv hour -> (sin, cos), so that 23:30 sits next to 00:00."""
+    a = 2 * np.pi * np.asarray(hour, float) / 24
+    return np.c_[np.sin(a), np.cos(a)]
+
+
+class Logistic:
+    """Logistic regression, a linear model, at sklearn's defaults: the oblast and the weekday one-hot, the hour on a
+    circle, counts and minutes as log1p and standardised."""
+
+    name = "logistic"
+    NUMERIC = [f for f in Features.NAMES if f not in ("obl", "hour", "dow")]
+
+    def fit(self, rows, hours, asof):
+        x = ColumnTransformer([("category", OneHotEncoder(handle_unknown="ignore"), ["obl", "dow"]),
+                               ("hour", FunctionTransformer(_hour_circle), ["hour"]),
+                               ("numeric", make_pipeline(FunctionTransformer(np.log1p), StandardScaler()), self.NUMERIC)])
+        self.model = make_pipeline(x, LogisticRegression(max_iter=1000)).fit(rows[Features.NAMES], rows[f"y{hours}"])
+        return self
+
+    def predict(self, rows):
+        return self.model.predict_proba(rows[Features.NAMES])[:, 1]
 
 
 class ForwardRun:

@@ -70,3 +70,23 @@ def test_splice_keeps_every_alert(m, a):
     assert (w.jaccard >= 0.99).all(), w.jaccard[w.jaccard < 0.99].to_dict()
     assert hc[hc.start < D.SPLICE].oblast_id.nunique() == hc[hc.start >= D.SPLICE].oblast_id.nunique() == 24
     assert (hc.set_index("start").resample("6h").size() > 0).all()
+
+
+@need_api
+def test_labels_and_baselines_reproduce_the_feasibility_probe(m, a):
+    """research/feasibility.md section 3: the probe's test window, its 21 oblasts, its numbers. The bar was set before
+    the run; the data differ slightly (alerts.in.ua after the splice, AIR only, regions.json levels)."""
+    from alerts.baselines import Climatology, Persistence
+    from alerts.features import ForecastTable
+    start, last = pd.Timestamp("2026-09-12 21:00", tz="UTC"), pd.Timestamp("2026-10-10 13:00", tz="UTC")
+    rows = ForecastTable(D.history(m, a), pd.Timestamp("2026-08-01", tz="UTC"), D.MAP_CUTOFF).rows
+    rows = rows[~rows.obl.isin([9, 22, 28])]  # the probe's train-only exclusion: >= 80% of the time under alert
+    clim = Climatology(28).predict(rows, asof=start)
+    pers = Persistence().predict(rows)
+    w = (rows.ts >= start) & (rows.ts <= last)
+    assert abs(w.sum() - 18214) <= 0.01 * 18214
+    brier = lambda p, y: float(((p[w] - rows.loc[w, y]) ** 2).mean())
+    for h, base, b_pers, b_clim in [(1, 0.234, 0.237, 0.144), (3, 0.414, 0.270, 0.165), (6, 0.531, 0.249, 0.160)]:
+        assert abs(rows.loc[w, f"y{h}"].mean() - base) <= 0.005
+        assert abs(brier(pers[f"persist_{h}"], f"y{h}") - b_pers) <= 0.005
+        assert abs(brier(clim[f"clim28_{h}"], f"y{h}") - b_clim) <= 0.003

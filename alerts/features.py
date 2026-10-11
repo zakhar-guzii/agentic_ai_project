@@ -59,7 +59,7 @@ class AlertGrid:
         # column t of each running array describes the minutes before t, so t = 0 .. n are all valid
         before = lambda a, first: np.hstack([np.full((len(a), 1), first, a.dtype), a])
         self._alert = before(np.cumsum(state, 1, dtype=np.int32), 0)
-        self._start = before(np.cumsum(starts > 0, 1, dtype=np.int32), 0)
+        self._start = before(np.cumsum(starts, 1, dtype=np.int32), 0)  # a count: two starts in a minute are two
         self._last_alert = before(np.maximum.accumulate(np.where(state, minute, NEVER), 1), NEVER)
         self._last_start = before(np.maximum.accumulate(np.where(starts > 0, minute, NEVER), 1), NEVER)
 
@@ -78,7 +78,7 @@ class AlertGrid:
         return self.alert_minutes(t, 1) > 0
 
     def starts(self, t, w):
-        """Minutes with an episode start in [T - w, T)."""
+        """Episode starts in [T - w, T); two in one minute count twice."""
         return self._start[:, t] - self._start[:, np.maximum(t - w, 0)]
 
     def minutes_since_alert(self, t):

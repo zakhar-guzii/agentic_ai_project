@@ -77,6 +77,16 @@ def test_no_row_for_an_oblast_under_alert_at_t():
     assert VOLYN not in at_noon and LVIV in at_noon  # Volyn is under alert until 12:00
 
 
+def test_two_starts_in_one_minute_count_twice():
+    # a 15-second blip in Volyn and a new alert 20 s later, in the same minute: people hear two sirens
+    blip = recs((VOLYN, "2026-10-01 09:00:05", "2026-10-01 09:00:20"),
+                (VOLYN, "2026-10-01 09:00:40", "2026-10-01 09:10:00"))
+    f = at(blip, "2026-10-01 10:30", VOLYN)
+    assert (f.starts_3h, f.starts_24h, f.nat_starts_3h) == (2, 2, 2)
+    tab = ForecastTable(blip, T("2026-10-01 08:00"), T("2026-10-01 12:00"))
+    assert row(tab, "2026-10-01 08:30", VOLYN).y1 == 1  # the label only says whether a start came
+
+
 def test_rows_are_in_time_order_with_the_oblasts_of_a_moment_together():
     rows = ForecastTable(DAY, T("2026-10-01 10:00"), T("2026-10-01 18:00")).rows
     assert rows.ts.is_monotonic_increasing

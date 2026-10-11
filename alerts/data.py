@@ -166,23 +166,25 @@ def _overlap(a, b):
 
 def compare(a, b, lo, hi, tol_min=2):
     """Agreement of two record tables on [lo, hi): per oblast and 'all'. Episodes are censored at hi.
-    a_in_b = share of A's episode starts with a B start within +-tol_min minutes."""
-    import numpy as np
+    a_in_b = share of A's episode starts in [lo, hi) with a B start within +-tol_min minutes, on exact times."""
     win = lambda r: r[(r.start < hi) & (r.end.isna() | (r.end > lo))]
     ea, eb = episodes(win(a), hi), episodes(win(b), hi)
     obl = sorted(set(ea.oblast_id) | set(eb.oblast_id))
     n = int((hi - lo).total_seconds() // 60)
-    (sa, ta), (sb, tb) = minute_grid(ea, lo, n, obl), minute_grid(eb, lo, n, obl)
+    sa, sb = minute_grid(ea, lo, n, obl)[0], minute_grid(eb, lo, n, obl)[0]
+    xa, xb = ea[ea.start >= lo], eb[eb.start >= lo]  # episode starts inside the window
+    per_obl = lambda s: s.reindex(obl, fill_value=0).to_numpy()
 
-    def hit(x, y):  # x starts that have a y start within +-tol
-        cy = np.concatenate([np.zeros((len(obl), 1)), np.cumsum(y > 0, 1)], 1)
-        i = np.arange(n)
-        w = cy[:, np.minimum(i + tol_min + 1, n)] - cy[:, np.maximum(i - tol_min, 0)]
-        return ((x > 0) & (w > 0)).sum(1)
+    def hit(x, y):  # x starts with a y start of the same oblast within +-tol_min, on exact times
+        y = y[["oblast_id", "start"]].sort_values("start").assign(hit=True)
+        m = pd.merge_asof(x.sort_values("start"), y, on="start", by="oblast_id",
+                          tolerance=pd.Timedelta(minutes=tol_min), direction="nearest")
+        return per_obl(m.groupby("oblast_id").hit.count())
 
     rows = pd.DataFrame({"minutes_a": sa.sum(1), "minutes_b": sb.sum(1), "inter": (sa & sb).sum(1),
-                         "union": (sa | sb).sum(1), "starts_a": (ta > 0).sum(1), "starts_b": (tb > 0).sum(1),
-                         "a_hit": hit(ta, tb), "b_hit": hit(tb, ta)}, index=pd.Index(obl, name="oblast_id"))
+                         "union": (sa | sb).sum(1), "starts_a": per_obl(xa.groupby("oblast_id").size()),
+                         "starts_b": per_obl(xb.groupby("oblast_id").size()), "a_hit": hit(xa, xb), "b_hit": hit(xb, xa)},
+                        index=pd.Index(obl, name="oblast_id"))
     # exact overlap in seconds (no minute rounding), episodes clipped to [lo, hi)
     clip = lambda e: e.assign(start=e.start.clip(lower=lo), end=e.end.clip(upper=hi))
     ca, cb = clip(ea), clip(eb)

@@ -73,7 +73,7 @@ def check(args):
     out.append(f"\n## Seam: map (A) vs alerts.in.ua (B), {D.SPLICE:%Y-%m-%d %H:%M} -> {D.MAP_CUTOFF:%Y-%m-%d %H:%M}\n")
     out.append(md(seam[["minutes_a", "minutes_b", "jaccard", "jaccard_s", "starts_a", "starts_b", "a_in_b", "b_in_a"]]))
     out.append("\n`jaccard` is on a minute grid (a minute counts if any part is under alert, as in feasibility.md); "
-               "`jaccard_s` is exact, in seconds. `a_in_b`: share of map episode starts with an API start within +-2 min.")
+               "`jaccard_s` is exact, in seconds. `a_in_b`: share of map episode starts with an API start within +-2 min, on exact start times.")
     corr, mae = D.daily_agreement(mc, ac, D.SPLICE, D.MAP_CUTOFF)
     out.append(f"\nDaily alert-minutes per (oblast, Kyiv day), full days only: correlation {corr:.4f}, MAE {mae:.1f} min.")
     out.append(f"\nUnit level (same raion uid; a start within 60 s, or a record of the other source covering it): map raion records without a counterpart "

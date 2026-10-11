@@ -50,3 +50,16 @@ def test_daily_alert_minutes_agree_by_kyiv_day():
     corr, mae = data.daily_agreement(a, b, lo, hi)
     assert mae == pytest.approx(10 / 4)  # cells (14,d1) 60 vs 50; (14,d2) 0/0; (31,d1) 30/30; (31,d2) 90/90
     assert data.daily_agreement(a, a, lo, hi) == (pytest.approx(1.0), 0.0)
+
+
+def test_start_match_uses_exact_times_not_minute_bins():
+    a = recs((14, "2026-10-01 10:00:00", "2026-10-01 10:30"))
+    late = lambda s: recs((14, s, "2026-10-01 10:30"))
+    assert data.compare(a, late("2026-10-01 10:02:30"), LO, HI).loc[14, "a_in_b"] == 0  # 2.5 min: the minute grid saw 2
+    assert data.compare(a, late("2026-10-01 10:02:00"), LO, HI).loc[14, "a_in_b"] == 1  # exactly 2 min still matches
+
+
+def test_two_starts_in_one_minute_count_as_two():
+    r = recs((14, "2026-10-01 10:00:05", "2026-10-01 10:00:25"), (14, "2026-10-01 10:00:40", "2026-10-01 10:30"))
+    s = data.compare(r, r, LO, HI).loc[14]
+    assert s.starts_a == 2 and s.a_hit == 2

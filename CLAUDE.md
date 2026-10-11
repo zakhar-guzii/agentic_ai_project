@@ -28,9 +28,38 @@ Text and Telegram data are optional in the brief. We leave them out, because the
 KSE grades the process. The AI log is their primary signal.
 
 **Data (as of 2026-10-11):**
-- **History:** a frozen snapshot of the official map (map.ukrainealarm.com) in [data/raw/map/](data/raw/map/), covering 2025-10-03 → 2026-10-10. Its provenance is in `MANIFEST.json` there. The site went behind a Cloudflare challenge on 2026-10-11; do not try to bypass it.
-- **Fresh and live data:** the alerts.in.ua API. The token lives in `.env` as `ALERTS_IN_UA_TOKEN`. Never print it and never paste it into the chat, because the chat log is submitted.
-- **Measured facts and data traps:** [research/feasibility.md](research/feasibility.md) and [research/data-sources.md](research/data-sources.md). The probe code behind those numbers is in [research/probe/](research/probe/).
+- **History before the splice:** a frozen snapshot of the official map (map.ukrainealarm.com) in [data/raw/map/](data/raw/map/).
+  - It covers 2025-10-03 → 2026-10-10 19:03 UTC (the map cutoff), and its provenance is in `MANIFEST.json`.
+  - The site went behind a Cloudflare challenge on 2026-10-11; do not try to bypass it.
+- **From the splice on, and live:** the alerts.in.ua API.
+  - Raw `month_ago` pulls, gzipped with a MANIFEST, are committed under `data/raw/alerts_in_ua/<UTC stamp>/`.
+  - `month_ago` is a rolling 30-day window, limited to 2 requests per minute; a full pull of 24 regions takes about 13 min.
+  - History has no `threats` field and carries only the final `alert_level` of each record.
+- **Splice:** alerts that start before 2026-09-12 00:00 Kyiv (`SPLICE`, 09-11 21:00 UTC) come from the map; later ones come from alerts.in.ua.
+- **Untouched holdout:** everything after the map cutoff. Make no decisions on it before step 7.
+- **Token:** it lives in `.env` as `ALERTS_IN_UA_TOKEN`.
+  - Never print it and never paste it into the chat, because the chat log is submitted.
+  - Send it only in the `Authorization` header.
+- **Data traps:** the measured ones are in [research/feasibility.md](research/feasibility.md), [research/data-sources.md](research/data-sources.md) and PROCESS_LOG ("Wrong #n"). The ones that matter most:
+  - the map is not AIR-only;
+  - `location_oblast_uid` is not the oblast id;
+  - the map marks ongoing alerts with the end sentinel `0001-01-01`.
+
+**Code:**
+- `alerts/api.py`: the alerts.in.ua client, with a paced, resumable history pull.
+- `alerts/data.py`: `load_map`, `load_api` → `history` (the splice) → `episodes` (per-oblast union, censored at `asof`) → `minute_grid`. Also `compare`, `daily_agreement` and `unmatched` for the seam checks.
+- `main.py`: the CLI. `fetch` pulls history (network). `check` builds the history and writes `results/data_report.md` (offline).
+- `tests/`: pytest. There is one file per seam; `test_real_data.py` holds the acceptance bar on the real data.
+- The probe in [research/probe/](research/probe/) is a frozen research record. Do not edit it.
+
+**How we work:**
+- **Environment.** Use the venv in `.venv/` (`python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`). Run everything through `.venv/bin/python` and `.venv/bin/pytest`.
+- **Tests first** (the /tdd skill):
+  - agree the seams before writing tests;
+  - write one red test, then the minimal code, then repeat;
+  - expected values come from worked examples;
+  - a test that passes at once must be checked by a mutation, run with `PYTHONDONTWRITEBYTECODE=1` (a stale `.pyc` once faked a failure).
+- **Commits** go on a step branch (for example `step-1-data`), one logical change per commit, with plain English messages. Merge into `main` once the step is done.
 
 **Language:** English for code and docs. Chat with the user in Ukrainian.
 
@@ -38,7 +67,7 @@ KSE grades the process. The AI log is their primary signal.
 
 Each step gets its own plan before work starts. Decisions and caught errors go to [PROCESS_LOG.md](PROCESS_LOG.md).
 
-- [ ] 1. **Data.** Build the alert history from the map snapshot plus alerts.in.ua: clean it, build per-oblast alert series, and check the seam between the sources.
+- [ ] 1. **Data.** Build the alert history from the map snapshot plus alerts.in.ua: clean it, build per-oblast alert series, and check the seam between the sources. _In progress:_ the code and the TDD tests are done; the full API pull and the acceptance check are pending.
 - [ ] 2. **Features and baselines.** Forecast-time features computed only from the past, climatology and persistence baselines, and leakage tests.
 - [ ] 3. **Model and evaluation.** The calibrated 1/3/6 h forecaster, scored on the latest period against the baselines.
 - [ ] 4. **Live forecast.** `predict` from alerts.in.ua, a log of every forecast, and its scoring.

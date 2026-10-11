@@ -97,3 +97,13 @@ def test_dropped_connection_is_retried(monkeypatch):
     monkeypatch.setattr(api.time, "sleep", lambda s: None)
     assert api.get("/v1/regions/14/alerts/month_ago.json", tok=TOK) == (200, '{"alerts": []}')
     assert len(calls) == 2
+
+
+def test_token_cut_at_the_length_limit_is_still_redacted(monkeypatch):
+    def fake_urlopen(req, timeout=None):  # the body is cut at 300 chars, in the middle of the token
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, io.BytesIO(("x" * 295 + TOK).encode()))
+
+    monkeypatch.setattr(api.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError) as e:
+        api.get("/v1/alerts/active.json", tok=TOK)
+    assert TOK[:5] not in str(e.value)

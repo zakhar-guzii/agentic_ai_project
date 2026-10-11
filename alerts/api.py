@@ -20,7 +20,7 @@ def get(path, tok, tries=3):
             if e.code == 429 and attempt < tries - 1:
                 time.sleep(60)
                 continue
-            body = e.read().decode("utf-8", "replace")[:300].replace(tok, "<redacted>")
+            body = e.read().decode("utf-8", "replace").replace(tok, "<redacted>")[:300]
             raise RuntimeError(f"HTTP {e.code} for {path}: {body}") from None
         except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, ConnectionError) as e:
             if attempt == tries - 1:

@@ -39,7 +39,7 @@ def md(df, floatfmt="{:.3f}"):
 
 
 def check(args):
-    """Offline: build the spliced history, check the seam and splice completeness, write results/data_report.md."""
+    """Offline: build the spliced history, check the seam, splice completeness and drift, write results/data_report.md."""
     import numpy as np
     import pandas as pd
     from alerts import data as D
@@ -108,6 +108,21 @@ def check(args):
     out.append(md(tab))
     out.append(f"\nRestarts within 5 min of an all-clear: {(ep.gap <= 300).sum()} of {len(ep)} episodes "
                f"({(ep.gap <= 300).mean():.1%}).")
+    # drift between the history a model learns from and the historical benchmark (nothing after the map cutoff)
+    from alerts.checks import AdversarialValidation
+    from alerts.features import Features, ForecastTable
+    from alerts.splits import DECISION
+    rows = ForecastTable(h, DECISION.bounds["train"][0], D.MAP_CUTOFF).rows
+    av = AdversarialValidation(Features.NAMES)
+    aucs, imp = av.run(DECISION.rows(rows, "train", 6), DECISION.rows(rows, "test", 6))
+    out.append("\n## Drift: time-blocked adversarial validation\n")
+    out.append(f"Train vs test (the historical benchmark), all 24 oblasts, {av.k} time blocks per set, nothing fitted "
+               f"within {av.gap.days} days of a held moment: AUC {aucs.mean():.3f} (folds "
+               f"{', '.join(f'{x:.3f}' for x in aucs)}); top features "
+               f"{', '.join(f'`{f}` {g:.0%}' for f, g in imp.head(4).items())}.")
+    out.append("\nThis measures drift only. A fit may hold blocks later than the held ones (the class is the period "
+               "itself), so it is not a check of forecasting the future: that comes from `Split.forward`. Train vs val "
+               "is not computed: 15 days cannot hold a block plus a 7-day gap on both sides, and `run` refuses.")
     rep = ROOT / "results/data_report.md"
     rep.parent.mkdir(exist_ok=True)
     rep.write_text("\n".join(out) + "\n")
@@ -122,7 +137,7 @@ def main():
     f = sub.add_parser("fetch", help="pull alerts.in.ua month_ago history for all oblasts (~13 min)")
     f.add_argument("--into", help="resume an interrupted pull directory")
     f.set_defaults(func=fetch)
-    sub.add_parser("check", help="offline: seam + splice checks, write results/data_report.md").set_defaults(func=check)
+    sub.add_parser("check", help="offline: seam, splice and drift checks, write results/data_report.md").set_defaults(func=check)
     args = ap.parse_args()
     args.func(args)
 

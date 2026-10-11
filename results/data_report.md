@@ -107,3 +107,9 @@ Unmatched records:
 | 31 | 832 | 2.232 | 0.094 | 0.328 | 0 | 3/6/11 |
 
 Restarts within 5 min of an all-clear: 1651 of 26128 episodes (6.3%).
+
+## Drift: time-blocked adversarial validation
+
+Train vs test (the historical benchmark), all 24 oblasts, 4 time blocks per set, nothing fitted within 7 days of a held moment: AUC 0.946 (folds 0.953, 0.986, 0.909, 0.937); top features `nat_starts_3h` 19%, `starts_7d` 16%, `obl` 14%, `alert_min_7d` 12%.
+
+This measures drift only. A fit may hold blocks later than the held ones (the class is the period itself), so it is not a check of forecasting the future: that comes from `Split.forward`. Train vs val is not computed: 15 days cannot hold a block plus a 7-day gap on both sides, and `run` refuses.

@@ -43,7 +43,8 @@ KSE grades the process. The AI log is their primary signal.
 - **Data traps:** the measured ones are in [research/feasibility.md](research/feasibility.md), [research/data-sources.md](research/data-sources.md) and PROCESS_LOG ("Wrong #n"). The ones that matter most:
   - the map is not AIR-only;
   - `location_oblast_uid` is not the oblast id;
-  - the map marks ongoing alerts with the end sentinel `0001-01-01`.
+  - the map marks ongoing alerts with the end sentinel `0001-01-01`;
+  - since the level reform the map keeps overlapping records for one raion, so count union episodes, never records.
 
 **Code:**
 - `alerts/api.py`: the alerts.in.ua client, with a paced, resumable history pull.
@@ -67,7 +68,7 @@ KSE grades the process. The AI log is their primary signal.
 
 Each step gets its own plan before work starts. Decisions and caught errors go to [PROCESS_LOG.md](PROCESS_LOG.md).
 
-- [ ] 1. **Data.** Build the alert history from the map snapshot plus alerts.in.ua: clean it, build per-oblast alert series, and check the seam between the sources. _In progress:_ the code and the TDD tests are done; the full API pull and the acceptance check are pending.
+- [x] 1. **Data.** Build the alert history from the map snapshot plus alerts.in.ua: clean it, build per-oblast alert series, and check the seam between the sources. Seam Jaccard 0.9994; report in `results/data_report.md`.
 - [ ] 2. **Features and baselines.** Forecast-time features computed only from the past, climatology and persistence baselines, and leakage tests.
 - [ ] 3. **Model and evaluation.** The calibrated 1/3/6 h forecaster, scored on the latest period against the baselines.
 - [ ] 4. **Live forecast.** `predict` from alerts.in.ua, a log of every forecast, and its scoring.

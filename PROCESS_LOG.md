@@ -184,3 +184,35 @@ Check these with raw alerts.in.ua samples before writing any parser:
   - On the partial pull, Zakarpattia scored 0.956 on minutes, below the 0.97 bar. It has only 3 alerts and 65 alert-minutes.
   - The exact overlap in seconds is **0.990**. The API records all-clears 8–17 s later than the map, which pushes ends into the next minute.
   - **Adjustment.** `compare` now also reports `jaccard_s`, the exact overlap in seconds, which was added test-first. The per-oblast bar (≥ 0.97) is applied to the exact value, and the minute-grid value stays in the report for comparison with feasibility.md. The threshold itself did not change; only the measurement did.
+
+### Step 1 result (2026-10-11 ~13:25 UTC)
+
+- **API pull.** `data/raw/alerts_in_ua/20261011T1247Z`: 24/24 regions returned HTTP 200, 16,574 raw rows, and 0 files contain the token.
+  - The pull broke twice on transient network errors: `IncompleteRead` on the 15th region, then `URLError` on Kherson for about 1 min.
+  - Fix: `get()` now retries dropped connections. This was written test-first. The pull was resumed from the same directory.
+- **Seam, map vs alerts.in.ua**, 2026-09-11 21:00 → 10-10 19:03 UTC. Every bar is met:
+
+  | Metric | Result | Bar |
+  |---|---|---|
+  | Jaccard, overall (minute grid / exact) | 0.9994 / 0.9994 | ≥ 0.99 |
+  | Jaccard, per oblast: minimum on the minute grid | 0.956 (Zakarpattia, see above) | – |
+  | Jaccard, per oblast: minimum exact | 0.990 | ≥ 0.97 |
+  | Starts matched within ±2 min (map → API / API → map) | 99.8% / 99.8% | ≥ 98% |
+  | Daily alert-minutes per (oblast, Kyiv day) | correlation 1.0000, MAE 0.3 min | – |
+
+- **Splice completeness.** Every bar is met:
+  - 117,276 records = 101,198 from the map + 16,078 from the API;
+  - in the window splice ± 12 h: Jaccard 0.9998, minimum per oblast 0.9965, starts 110 vs 110;
+  - all 24 oblasts have records on both sides of the splice;
+  - there are 0 six-hour bins without a national start.
+- **Wrong #5 (my metric): "unit-level match = a start within 60 s".**
+  - **Before.** 1,791 map raion records had no API record with a start within 60 s, failing the ≤ 1% bar. The API side had 1 such record.
+  - **Check.** 1,780 of the 1,791 lie *inside* an API record of the same raion.
+    - Since the level reform, the map stores overlapping records for one raion. 10% of its raion records in Sep 2026 and 13% in Oct start while an earlier record of the same raion is still open. Before September the share rounds to 0% (the first is on 2025-11-10).
+    - alerts.in.ua keeps one record for the same alert.
+  - **Adjustment.** `unmatched()` also counts a covering record as a match; this was written test-first.
+  - **After.** 11 of 15,474 map raion records have no counterpart (0.07%), and 0 of 13,526 API records lack one. The 11 are listed in the data report: 6 blips of 1–9 s, and 5 stretches of 1–10 h that the API starts later.
+  - **For step 5.** On the map, record counts after the reform are inflated by about 10–13%. Count union episodes, never records.
+- **Manual spot check.** 3 random API raion records were found in the raw map JSON: starts within 1 s, ends within 0.4 s to 2 min.
+- **Tests.** 36 pass: 30 written test-first, plus the acceptance tests in `test_real_data.py`.
+- **For step 2.** 6.3% of episodes (1,651 of 26,128) restart within 5 min of an all-clear.

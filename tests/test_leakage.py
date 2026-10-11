@@ -48,7 +48,7 @@ def test_climatology_uses_nothing_from_t_on():
 import pytest  # noqa: E402
 
 from alerts import data as D  # noqa: E402
-from alerts.splits import DECISION  # noqa: E402
+from alerts.splits import BENCHMARK, CHOOSE, DECISION  # noqa: E402
 
 need_api = pytest.mark.skipif(not list(D.API_DIR.glob("*/MANIFEST.json")), reason="no alerts.in.ua pull saved yet")
 
@@ -56,6 +56,11 @@ need_api = pytest.mark.skipif(not list(D.API_DIR.glob("*/MANIFEST.json")), reaso
 @pytest.fixture(scope="module")
 def history():
     return D.history(D.load_map(), D.load_api())
+
+
+@pytest.fixture(scope="module")
+def rows(history):
+    return ForecastTable(history, T("2025-11-01"), D.MAP_CUTOFF).rows
 
 
 def hard_moments(h):
@@ -88,9 +93,21 @@ def test_real_features_and_climatology_use_nothing_from_t_on(history):
 
 
 @need_api
-def test_decision_split_purges_every_label_window(history):
-    rows = ForecastTable(history, T("2025-11-01"), D.MAP_CUTOFF).rows
+def test_decision_split_purges_every_label_window(rows):
     (_, val_start), (_, test_start), _ = DECISION.bounds.values()
     for h in (1, 3, 6):
         late = lambda part: (DECISION.rows(rows, part, h).ts + pd.Timedelta(hours=h)).max()
         assert late("train") <= val_start and late("val") <= test_start
+
+
+@need_api
+def test_forward_checks_fit_only_on_labels_known_at_each_block_start(rows):
+    for a, b, blocks in (CHOOSE, BENCHMARK):
+        for h in (1, 3, 6):
+            folds = list(DECISION.forward(rows, h, a, b, blocks))
+            assert len(folds) == blocks
+            for fit, held in folds:
+                assert (fit.ts + pd.Timedelta(hours=h)).max() <= held.ts.min()  # held.ts.min() is the block start
+                assert held.ts.min() >= a and (held.ts + pd.Timedelta(hours=h)).max() <= b
+            block = pd.concat([held.assign(k=k) for k, (_, held) in enumerate(folds)])
+            assert (block.groupby("ts").k.nunique() == 1).all()  # a moment is never split between blocks

@@ -520,3 +520,23 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
 - Score this candidate once on the four BENCHMARK forward blocks, 2026-09-12 21:00 UTC through 2026-10-10 19:03 UTC. The historical benchmark was already seen by the feasibility probe and must be described that way.
 - **Strict bar unchanged:** both daily clim28 AND recent7 95% Kyiv-day bootstrap CI lower bounds must be strictly > 0 on the same horizon, on at least 2 of H = 1/3/6. Use 1,000 resamples, seed 0, all 24 modeled regions, flag regional n < 100.
 - Keep logistic whatever the verdict; the verdict controls the claim. Fit the final models on labels completed at MAP_CUTOFF and their Platt calibrators on the preceding 14 days of OOF forecasts. Save `models/logistic.joblib` and its SHA-256. That exact artifact is reserved for step 7's untouched holdout, which remains unscored here.
+
+
+### Benchmark results and step-3 completion
+
+- **Pre-registration commit:** `30cb39a1c08edd62ecc7f67a7d1c49b47fe1d12a`, recorded before the single `evaluate benchmark` run. No candidate or setting changed after selection. The same logistic CHOOSE raw forecasts were regenerated exactly, checked against the frozen CHOOSE CSV.
+- Four sequential benchmark blocks for each horizon, all 24 modeled regions, completed labels only. Pooled results:
+
+  | H | n | Logistic Brier | Skill vs daily clim28 (95% CI) | Skill vs recent7 (95% CI) | Both lower bounds > 0 |
+  |---|---:|---:|---|---|---|
+  | 1 h | 18,538 | 0.12460149 | +0.0753 [+0.0535, +0.0995] | +0.0547 [+0.0353, +0.0743] | yes |
+  | 3 h | 18,492 | 0.13334334 | +0.0789 [+0.0399, +0.1233] | +0.0476 [+0.0087, +0.0821] | yes |
+  | 6 h | 18,419 | 0.12350017 | +0.0667 [+0.0201, +0.1156] | +0.0280 [-0.0272, +0.0783] | no |
+
+- **Registered bar: PASS (2 of 3).** The historical benchmark supports a pooled improvement against both strong references at 1 and 3 h. At 6 h the point gain versus recent7 is positive but its interval crosses zero. This is not evidence for every region, or an untouched-holdout claim.
+- **Frozen final artifact:** `models/logistic.joblib`, SHA-256 `ffbce213e5e203c6246c2c2e8f4bfb4461349a5837545e487467973b18219243`. Final training counts = 267,259 / 267,213 / 267,140; OOF calibration counts = 9,202 / 9,156 / 9,083. Fit cutoff 2026-10-10 19:03 UTC; calibration window 14 days. Metadata records the pre-registration commit and pinned library versions.
+- **Forecast rows:** `results/benchmark_forecasts.csv.gz`, SHA-256 `19db7e3d0d064c47c50c1ff81d3edfcff411fd3b58a421e76b3b1bc4ceffd155`. Independent NumPy arithmetic from the CSV reproduces all point skills to < 1e-12. Boundaries, four blocks and all 24 regions verified for each horizon. Full report and machine-readable summary are committed alongside it.
+- **Fresh-process load verified.** Loaded the saved artifact, computed features at its cutoff for 12 clear regions, checked all three probabilities are finite and in [0,1], then saved/loaded it again and obtained exact prediction equality. Those cutoff features also match features from records truncated to what was event-time-known then. No post-cutoff outcomes were used for this check.
+- **Freeze protection verified:** repeat CLI calls refuse existing CHOOSE and benchmark artifacts before training. Both output hashes still match. Metric/CLI tests pass after pre-registration; 89 tests passed before scoring, and the strengthened final-calibration test passed separately after its mutation correction. `check` remains byte-identical.
+- Preserved the previous session's generated `catboost_info/` directory and added it to `.gitignore`; new CatBoost fits suppress auxiliary files.
+- **Open limitation:** final API record revisions are not publication-time snapshots. The historical event-time checks do not remove this risk; live snapshot comparison and the untouched holdout are reserved for later steps. Steps 4–8 are not implemented in this continuation.

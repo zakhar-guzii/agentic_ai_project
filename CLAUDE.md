@@ -11,7 +11,7 @@ It is a Python tool that shows, for every oblast of Ukraine:
 
 It runs as a CLI that prints a table and writes a single HTML page. Every forecast is logged and scored once its window has passed.
 
-**Why this framing.** In our feasibility probe ([research/](research/)), "a new alert within 1–6 h" was the only target that beat a 28-day climatology on the latest weeks; daily and "tonight" targets did not. That climatology was frozen at the test start (Wrong #9). Against one recounted daily, and against the 7-day recent level, the gain is small or none, and step 3 measures it. KSE also asks for a usable artifact.
+**Why this framing.** In the feasibility probe, "a new alert within 1–6 h" was the only target that beat a frozen 28-day climatology; daily and "tonight" targets did not (Wrong #9). Step 3 compared five candidates and selected calibrated logistic regression. On the historical benchmark, Brier skill versus daily clim28 is +7.5% / +7.9% / +6.7%, and versus recent7 is +5.5% / +4.8% / +2.8% for 1/3/6 h. Both reference comparisons have positive 95% Kyiv-day bootstrap lower bounds at 1 and 3 h, passing the registered bar; at 6 h the gain against recent7 is uncertain. These are pooled results across 24 modeled regions, not a guarantee for each region. The benchmark was already seen by the probe; the untouched holdout remains for step 7.
 
 **Brief requirements:**
 - use the most recent data;
@@ -53,7 +53,10 @@ KSE grades the process. The AI log is their primary signal.
 - `alerts/splits.py`: `Split` with the purge; `DECISION` = train / val / test, where test is a historical benchmark (seen by the probe). `forward()` gives the sequential forecast checks: blocks of unique moments, each fitted only on labels known at its start. `CHOOSE` and `BENCHMARK` are step 3's ranges; the step-3 contract is in PROCESS_LOG, Decision 4.
 - `alerts/baselines.py`: `Climatology(28 | None)` (recounted daily), `RecentLevel`, `Persistence`. Nothing is trained.
 - `alerts/checks.py`: `TruncationCheck` (leakage) and `AdversarialValidation` (drift: time blocks with a 7-day gap; not a check of forecasting).
-- `main.py`: the CLI. `fetch` pulls history (network). `check` builds the history and writes `results/data_report.md` with the seam, splice and drift checks (offline).
+- `alerts/model.py`: five fixed candidates, sequential OOF calibration, final fitting and trusted joblib persistence. `CHOSEN = "logistic"` was committed before benchmark scoring.
+- `alerts/evaluate.py`: Brier scores, 1,000-resample Kyiv-day bootstrap, regional counts/flags, reliability, error correlations and the registered bar.
+- `main.py`: the CLI. `fetch` pulls history (network). `check` writes the data report (offline). `evaluate choose|benchmark` writes frozen forecasts, reports and summaries; it refuses to overwrite existing artifacts.
+- `models/logistic.joblib`: the frozen final 1/3/6 h forecaster, fitted at MAP_CUTOFF. Usage and result-reading examples: `results/model_usage.md`.
 - `tests/`: pytest. There is one file per seam; `test_real_data.py` holds the acceptance bar on the real data.
 - The probe in [research/probe/](research/probe/) is a frozen research record. Do not edit it.
 
@@ -74,7 +77,7 @@ Each step gets its own plan before work starts. Decisions and caught errors go t
 
 - [x] 1. **Data.** Build the alert history from the map snapshot plus alerts.in.ua: clean it, build per-oblast alert series, and check the seam between the sources. Seam Jaccard 0.9994; report in `results/data_report.md`.
 - [x] 2. **Features and baselines.** Forecast-time features computed only from the past, climatology and persistence baselines, and leakage tests. Probe reproduced; leakage tests pass on 30 real moments. Wrong #9: against a daily-recounted 28-day climatology the probe's model gains only about +0.02 to +0.06, and the 7-day recent level is as strong (PROCESS_LOG). Split fix (Decision 4): rows sorted by time, sequential forecast checks, time-blocked AV (train vs test AUC 0.944, not 0.9995), all 24 oblasts. Review fixes: Wrong #11 (count every start), Wrong #12 (AV never fits held rows).
-- [ ] 3. **Model and evaluation.** The calibrated 1/3/6 h forecaster, chosen on the `CHOOSE` forward checks (each calibrator sees only earlier blocks) and scored once on the historical benchmark against the baselines; all 24 oblasts, with per-oblast counts.
+- [x] 3. **Model and evaluation.** Calibrated logistic regression selected from five candidates on `CHOOSE` blocks 3–6 and scored once on four historical benchmark blocks. All 24 modeled regions (23 oblasts + Kyiv City), with regional counts/flags. Registered strict bar passes at 1 and 3 h; 6 h versus recent7 remains uncertain. Final model and forecast rows saved; see `results/benchmark_report.md`.
 - [ ] 4. **Live forecast.** `predict` from alerts.in.ua, a log of every forecast, and its scoring.
 - [ ] 5. **History analytics.** Alert load over time, and the yellow/red levels since the reform.
 - [ ] 6. **Outlook page.** One HTML page that combines now, next hours, history and model quality.

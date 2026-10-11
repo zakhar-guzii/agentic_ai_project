@@ -405,3 +405,28 @@ The user asked why. Adversarial validation (AV) trains a classifier to tell two 
   - Step 4: the live log keeps what the API showed at T. When a forecast is scored, features from that snapshot are compared with features from the final history at the same T: the share of differing rows and the effect on Brier.
   - Step 7: the fresh holdout pull is compared with the 2026-10-11 pull, the only one so far, for records with the same id whose start or end changed.
   - Until then it stays an open limitation: 183 of 13,885 records were updated more than 60 s after their all-clear.
+
+### Code review of step 2 (2026-10-11)
+
+A review found two P2 bugs. Both were reproduced on the data and fixed test-first, and each new test failed before its fix.
+
+- **Wrong #11: the start counters counted minutes with a start, not starts.**
+  - **Before.** `minute_grid` returns the number of starts in each minute, but `AlertGrid` added up `starts > 0`. So two starts of one oblast in one minute (a blip shorter than a minute, then a new alert) counted once.
+    - This contradicts Decision 3: restarts are separate starts, because people hear a new siren.
+    - The probe had the same flag (`cumsum(ST > 0)`); the probe stays frozen.
+  - **Measured.** 19 of 26,128 starts were merged, in 19 oblast-minutes across 12 oblasts (5 of them in Odeska).
+    - Of 267,283 forecast rows, `starts_7d` was too low in 3,059 (1.14%), `starts_3h` in 43, and `nat_starts_3h` in 1,744 (0.65%).
+    - `RecentLevel` reads `starts_7d`, so its rate was too low in the same rows.
+  - **After.** `AlertGrid` adds up the counts and now sees all 26,128 starts. These do not change:
+    - the labels (`> 0`), `min_since_start` and `Persistence`;
+    - the clear rows and the climatology.
+
+    The probe reproduction and the truncation checks still pass.
+  - **Effect on the numbers.**
+    - `RecentLevel` Brier on the Wrong #9 window: 0.1318 / 0.1413 / 0.1285, unchanged to four decimals.
+    - Time-blocked AV, train vs test: AUC 0.946 → **0.944** (folds 0.951 / 0.987 / 0.905 / 0.935).
+    - The frozen leakage audit was computed with the merged starts. Its row counts do not depend on them, but a re-run can differ in the last digits of its AUCs.
+- **Wrong #12: AV with gap = 0 fitted on held rows.**
+  - **Before.** `folds()` left out the rows strictly inside (first held moment − gap, last held moment + gap). With gap = 0, the first and last moments of a held block fell outside that zone, so they were both fitted and held: 4 rows in every fold of the test example.
+  - **After.** The fit leaves out the held rows explicitly, whatever the gap. The default 7-day gap already covered them (0 such rows), so the reported AUC was not affected.
+- **Tests.** 72 pass: 70 before, plus the two new tests.

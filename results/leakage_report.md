@@ -1,6 +1,6 @@
 # Leakage audit and the cause of the near-perfect adversarial AUC
 
-**Resolution (2026-10-11):** AV now holds out time blocks with a 7-day gap ([PROCESS_LOG, Decision 4](../PROCESS_LOG.md)): train vs test, 24 oblasts, AUC 0.946. The endpoint numbers below remain sensitivity diagnostics, not a forecast estimate.
+**Resolution (2026-10-11):** AV now holds out time blocks with a 7-day gap ([PROCESS_LOG, Decision 4](../PROCESS_LOG.md)): train vs test, 24 oblasts, AUC 0.944. The endpoint numbers below remain sensitivity diagnostics, not a forecast estimate.
 
 Date: 2026-10-11. Scope: the existing step-2 features, baselines, chronological split and AV diagnostic. No forecast model was fitted or selected in this audit.
 

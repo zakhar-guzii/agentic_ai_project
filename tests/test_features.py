@@ -77,6 +77,12 @@ def test_no_row_for_an_oblast_under_alert_at_t():
     assert VOLYN not in at_noon and LVIV in at_noon  # Volyn is under alert until 12:00
 
 
+def test_rows_are_in_time_order_with_the_oblasts_of_a_moment_together():
+    rows = ForecastTable(DAY, T("2026-10-01 10:00"), T("2026-10-01 18:00")).rows
+    assert rows.ts.is_monotonic_increasing
+    assert rows.obl[rows.ts == T("2026-10-01 10:00")].is_monotonic_increasing  # a fixed order inside a moment
+
+
 def test_hour_and_weekday_are_kyiv_local_across_the_dst_switch():
     quiet = recs((VOLYN, "2026-03-27 09:00", "2026-03-27 09:30"))
     rows = ForecastTable(quiet, T("2026-03-29 00:00"), T("2026-03-29 02:00")).rows

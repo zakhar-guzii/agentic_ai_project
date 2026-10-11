@@ -136,7 +136,7 @@ class Features:
 class ForecastTable:
     """Rows for training and evaluation: one per (oblast, T) for moments T every `step` in [start, end) where the
     oblast is clear at T (no alert in the minute before), with the features and the labels y1, y3, y6 (an episode
-    start in [T, T + H)).
+    start in [T, T + H)). Sorted by (T, oblast).
 
     The grid starts 8 days before `start`, so the 7-day windows of the first rows are full.
     """
@@ -147,4 +147,5 @@ class ForecastTable:
         rows, t = Features(self.grid).at(moments), self.grid.index(moments)
         for h in HOURS:
             rows[f"y{h}"] = self.grid.start_within(t, 60 * h).ravel()
-        self.rows = rows[rows.under == 0].drop(columns="under").reset_index(drop=True)
+        # in time order, not oblast-major like the arrays: a split by row position must not mix time
+        self.rows = rows[rows.under == 0].drop(columns="under").sort_values(["ts", "obl"], ignore_index=True)

@@ -1,4 +1,4 @@
-"""Alert Outlook CLI.  usage: python main.py {fetch,check}"""
+"""Alert Outlook CLI.  usage: python main.py {fetch,check,evaluate}"""
 import argparse
 import os
 from pathlib import Path
@@ -131,6 +131,144 @@ def check(args):
           f"{s.a_in_b:.3f}/{s.b_in_a:.3f}; unmatched raion records {len(um)}; wrote {rep.relative_to(ROOT)}")
 
 
+def evaluate(args):
+    """Offline, registered model selection followed by a single historical benchmark."""
+    import gzip
+    import hashlib
+    import json
+    import subprocess
+    import pandas as pd
+    from alerts import data as D
+    from alerts.baselines import Climatology, Persistence, RecentLevel
+    from alerts.evaluate import Scores, bar
+    from alerts.features import ForecastTable, HOURS, OBLASTS
+    from alerts.model import CHOSEN, Boosting, CatBoost, ForwardRun, Logistic
+    from alerts.splits import CHOOSE, BENCHMARK, DECISION
+
+    stage = args.stage
+    if stage == "benchmark" and CHOSEN is None:
+        raise SystemExit("pre-register CHOSEN in alerts/model.py before running the benchmark")
+    dest = ROOT / "results"
+    dest.mkdir(exist_ok=True)
+    report = dest / f"{stage}_report.md"
+    forecasts = dest / f"{stage}_forecasts.csv.gz"
+    summary_path = dest / f"{stage}_summary.json"
+    if any(p.exists() for p in (report, forecasts, summary_path)):
+        raise SystemExit(f"{stage} artifacts already exist; refusing to overwrite a frozen evaluation")
+    candidates = [Boosting(), Boosting(clim=True), Boosting(half_life=60), CatBoost(), Logistic()]
+    if stage == "benchmark":
+        candidates = [c for c in candidates if c.name == CHOSEN]
+        if not candidates:
+            raise SystemExit(f"unknown pre-registered candidate: {CHOSEN}")
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                            capture_output=True, text=True, check=True).stdout.strip()
+    end = CHOOSE[1] if stage == "choose" else D.MAP_CUTOFF
+    # Use the frozen first API pull, even if future pulls are added for later steps.
+    frozen_api = API_RAW / "20261011T1247Z"
+    if not frozen_api.exists():
+        raise SystemExit("the frozen 20261011T1247Z API pull is required for step 3")
+    a = _frozen_api(frozen_api)
+    records = D.history(D.load_map(), a)
+    rows = ForecastTable(records, DECISION.bounds["train"][0], end).rows
+    for baseline in (Climatology(28), Climatology(None), RecentLevel(), Persistence()):
+        rows = rows.join(baseline.predict(rows))
+    run = ForwardRun(candidates)
+    raws, saved, skills, mean_skills = {}, [], {}, {c.name: [] for c in candidates}
+    out = [f"# {stage.title()} report", "",
+           "These scores chose the model; not independent." if stage == "choose" else
+           "Historical benchmark, seen by the feasibility probe. This is not the untouched holdout.",
+           f"\nGenerated offline by `python main.py evaluate {stage}` at commit `{commit}`.",
+           f"Window ends at {end}; horizons 1/3/6 h; all 24 regions (23 oblasts and Kyiv City).",
+           "Brier is mean squared probability error (lower is better). Skill = 1 - Brier / reference Brier.",
+           "95% intervals: 1,000 whole Kyiv-day bootstrap resamples, seed 0. Rows are weighted equally; days preserve their row counts.",
+           "clim28 and climall are recounted daily; recent7 follows the last seven days; persist repeats the previous horizon.",
+           "Model settings are fixed. Each block model fits completed past labels; Platt calibration uses only the previous 14 days of OOF forecasts.",
+           "The n < 100 flag was set before scoring; n >= 100 alone does not establish regional skill.",
+           "History contains final API revisions: event-time truncation cannot establish that every record was published at T.",
+           "\n## Registered rule\n",
+           "Choose the candidate with the highest mean calibrated skill vs daily clim28 over the three horizons, CHOOSE blocks 3-6.",
+           "Benchmark passes only when BOTH clim28 and recent7 lower CI bounds exceed zero on at least two horizons. No switching after benchmark."]
+    names = {int(x['regionId']): x['regionName'] for x in json.loads(D.REGIONS.read_text())["states"]}
+    for h in HOURS:
+        raw = run.run(rows, h, [CHOOSE] if stage == "choose" else [CHOOSE, BENCHMARK], progress=True)
+        raws[h] = raw
+        scored = raw[raw.scored & (raw.ts >= (CHOOSE[0] if stage == "choose" else BENCHMARK[0]))]
+        assert set(scored.obl) == set(OBLASTS), "evaluation must include all 24 regions"
+        score = Scores(scored, h)
+        pooled = []
+        out += [f"\n## Horizon {h} h\n", f"n = {len(scored)}; base rate = {score.y.mean():.4f}; "
+                f"{scored.ts.min()} through {scored.ts.max()}; {scored.block.nunique()} scored blocks."]
+        for c in candidates:
+            skill = {ref: score.skill(c.name, f"{ref}_{h}") for ref in ("clim28", "recent7")}
+            if stage == "benchmark":
+                skills[h] = skill
+            mean_skills[c.name].append(skill["clim28"][0])
+            pooled.append(dict(forecast=c.name, brier=score.brier(c.name), raw_brier=score.brier(f"raw_{c.name}"),
+                               skill_clim28=skill['clim28'][0], ci_clim28=f"[{skill['clim28'][1]:+.4f}, {skill['clim28'][2]:+.4f}]",
+                               skill_recent7=skill['recent7'][0], ci_recent7=f"[{skill['recent7'][1]:+.4f}, {skill['recent7'][2]:+.4f}]"))
+        for ref in ('clim28', 'climall', 'recent7', 'persist'):
+            pooled.append(dict(forecast=ref, brier=score.brier(f'{ref}_{h}')))
+        out.append(md(pd.DataFrame(pooled).set_index('forecast'), '{:.4f}'))
+        blocks = []
+        for block, part in scored.groupby('block'):
+            sc = Scores(part, h)
+            blocks.append(dict(block=block, n=len(part), **{c.name: sc.brier(c.name) for c in candidates},
+                               **{ref: sc.brier(f'{ref}_{h}') for ref in ('clim28', 'recent7')}))
+        out += ['\n### Brier per block\n', md(pd.DataFrame(blocks).set_index('block'), '{:.4f}')]
+        if stage == 'choose':
+            cols = [c.name for c in candidates] + [f'{ref}_{h}' for ref in ('clim28', 'recent7', 'climall', 'persist')]
+            out += ['\n### Correlation of errors (y - p)\n', md(score.error_correlation(cols))]
+        for c in candidates:
+            region = score.per_oblast(c.name)
+            region.insert(0, 'region', region.index.map(names))
+            out += [f'\n### Per region: {c.name}\n', md(region, '{:.4f}'),
+                    f'\n### Reliability: {c.name} (bins [0,.1), ... [.9,1])\n', md(score.reliability(c.name), '{:.4f}')]
+        cols = ['obl', 'ts', f'y{h}', 'block', 'scored'] + [f'{ref}_{h}' for ref in ('clim28', 'climall', 'recent7', 'persist')]
+        cols += [x for c in candidates for x in (f'raw_{c.name}', c.name)]
+        saved.append(raw[cols].rename(columns={f'y{h}': 'y', **{f'{ref}_{h}': ref for ref in
+                                                            ('clim28', 'climall', 'recent7', 'persist')}}).assign(hours=h))
+    summary = dict(stage=stage, git_commit=commit, end=str(end), candidates=[c.name for c in candidates],
+                   data_manifest_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+                                         for p in (frozen_api / 'MANIFEST.json', D.MAP_DIR / 'MANIFEST.json')})
+    if stage == 'choose':
+        means = {name: sum(vals) / len(vals) for name, vals in mean_skills.items()}
+        winner = max(means, key=means.get)
+        summary.update(winner=winner, mean_skill_clim28=means)
+        out += ['\n## Choice by the registered rule\n', md(pd.DataFrame.from_dict(means, orient='index',
+                                                                                   columns=['mean_skill_clim28']), '{:.6f}'),
+                f'\nWinner: **{winner}**. These scores are selection evidence, not independent evaluation. No blend or tuning was added.']
+    else:
+        passed, verdict = bar(skills)
+        summary.update(chosen=CHOSEN, skills=skills, passed=passed, bar_passed=verdict)
+        forecaster = run.final(rows, raws, D.MAP_CUTOFF)[CHOSEN]
+        model_path = ROOT / f'models/{CHOSEN}.joblib'
+        if model_path.exists():
+            raise SystemExit('saved model already exists; refusing to replace it')
+        forecaster.save(model_path)
+        digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
+        summary.update(model_sha256=digest, model_path=str(model_path.relative_to(ROOT)))
+        out += ['\n## Benchmark verdict\n', f'Per horizon: {passed}. Strict bar: **{"PASS" if verdict else "FAIL"}**.',
+                f'Saved model: `{model_path.relative_to(ROOT)}`; SHA-256 `{digest}`.',
+                f'Models fit labels completed by {D.MAP_CUTOFF}; final Platt uses preceding 14 days of OOF forecasts.',
+                'This artifact is frozen for step 7. No holdout outcomes were scored in step 3.']
+    forecasts.write_bytes(gzip.compress(pd.concat(saved, ignore_index=True).to_csv(index=False).encode(), mtime=0))
+    summary['forecasts_sha256'] = hashlib.sha256(forecasts.read_bytes()).hexdigest()
+    out += [f'\nForecast rows: `{forecasts.relative_to(ROOT)}`; SHA-256 `{summary["forecasts_sha256"]}`.',
+            'The file includes unscored CHOOSE warm-up rows; for benchmark metrics filter ts >= benchmark start and scored = True.']
+    report.write_text('\n'.join(out) + '\n')
+    summary_path.write_text(json.dumps(summary, indent=2) + '\n')
+    print(json.dumps(summary, indent=2), flush=True)
+
+
+def _frozen_api(directory):
+    """Use the original pull without duplicating the loader or changing its directory contract."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / directory.name).symlink_to(directory, target_is_directory=True)
+        from alerts.data import load_api
+        return load_api(Path(tmp))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -138,6 +276,9 @@ def main():
     f.add_argument("--into", help="resume an interrupted pull directory")
     f.set_defaults(func=fetch)
     sub.add_parser("check", help="offline: seam, splice and drift checks, write results/data_report.md").set_defaults(func=check)
+    e = sub.add_parser("evaluate", help="offline: model choice or the registered historical benchmark")
+    e.add_argument("stage", choices=["choose", "benchmark"])
+    e.set_defaults(func=evaluate)
     args = ap.parse_args()
     args.func(args)
 

@@ -478,3 +478,16 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
   - Step 4 loads this file. Step 7 scores exactly this file, and its SHA-256 is logged before the holdout is opened.
   - Every row's forecasts go to `results/{choose,benchmark}_forecasts.csv.gz`, so each reported number can be rechecked without retraining.
 - **Framing claim (the user).** CLAUDE.md said the target "beats a 28-day climatology"; Wrong #9 showed this holds only against a frozen one. CLAUDE.md now says so, and gets the measured result after the benchmark.
+
+
+### Step-3 continuation (2026-10-11)
+
+- The previous session stopped after writing the serialization test, before implementing `Forecaster`. Its test failed at import; it also constructed an invalid date (`2026-09-028`). Corrected that date, then implemented `ForwardRun.final` and trusted-artifact joblib save/load. Horizons own separate fitted models and OOF calibrators; metadata includes counts, feature names, versions, cutoff and the code commit.
+- Recovered the approved plan into `research/step-3-plan.md`. The user explicitly limited the resumed scope to step 3. No live features, page, new candidates, blend, tuning or holdout scoring is included.
+- The registered choice and strict benchmark bar from Decision 5 are unchanged. Completion uses the fixed choice rule; no new discretionary blend is introduced after viewing correlations.
+- Added `Scores`, Kyiv-day block bootstrap (1,000 resamples, seed 0), per-region counts, reliability, error correlations and the strict bar. Worked examples tested: daily skills -0.5/+0.5 give CI [-0.5,+0.5]; 99 rows are flagged, 100 are not; both references must have lower CI > 0 on at least two horizons. Zero-reference-loss or undefined intervals cannot count as a pass.
+- Added the offline `evaluate choose|benchmark` CLI. Benchmark refuses before pre-registration; either stage refuses to overwrite frozen reports/forecasts/summary. Data use is pinned to the first API pull and the frozen map; later pulls cannot change this evaluation. Source-manifest and output SHA-256 hashes are recorded.
+- **Wrong #14: "CatBoost defaults" do not imply ordered boosting.** The original plan described ordered boosting as if it were the default here. Kept the approved library defaults, corrected the code docstring, and disabled only auxiliary training-file output. The effective mode will be inspected rather than inferred.
+- **Test correction:** the first final-calibration test passed even after removing the completed-label purge, because its raw-forecast table already ended at the fit cutoff. Extended the worked example with later rows. The mutation now fails (14 calibration rows instead of the expected 9); the code was restored. Final fit uses 14 completed rows, and the calibrated constant forecast is 4/9.
+- The saved final model is refitted at the cutoff. Serialization must reproduce this final model's forecasts, not the last block model's forecasts (the latter has a different training window).
+- **Verification before any model score:** 89 tests passed, including all five candidates’ end-to-end truncation checks and planted-leak controls. The strengthened final-calibration test also passes after restoration. Existing SciPy deprecation warnings are covered by the existing SciPy < 1.18 pin.

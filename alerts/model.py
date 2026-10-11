@@ -19,7 +19,7 @@ from alerts.features import Features
 from alerts.splits import DECISION
 
 CALIBRATION = pd.Timedelta("14D")  # a calibrator learns from the forecasts of the 14 days before its block
-CHOSEN = None  # set in a pre-registration commit, before the historical benchmark is scored
+CHOSEN = "logistic"  # set in a pre-registration commit, before the historical benchmark is scored
 
 
 class Platt:

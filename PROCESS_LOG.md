@@ -512,3 +512,11 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
 - Candidate error correlations are high (about 0.936–0.996 across distinct candidates). No blend or tuning is introduced. This does not prove that no blend could help; it keeps the approved scope and choice rule.
 - Saved `results/choose_report.md`, `results/choose_summary.json`, `results/choose_forecasts.csv.gz`. Forecast-file SHA-256: `73230d47236c8978da5052ea3e8f6001057cf1e009c0317f64362462c986a726`. An independent NumPy calculation from the CSV reproduces all five mean skills and the winner to < 1e-12; all rows satisfy T + H <= the CHOOSE cutoff.
 - Additional mutation checks caught UTC-day grouping, flagging n = 100, and accepting CI lower bound = 0; all code restored. `python main.py check` reproduces the existing data report byte for byte.
+
+
+### Benchmark pre-registration (before any benchmark score)
+
+- **CHOSEN = "logistic"**, determined solely by Decision 5's fixed CHOOSE rule. No stacking, new candidate, tuning or benchmark-driven substitution.
+- Score this candidate once on the four BENCHMARK forward blocks, 2026-09-12 21:00 UTC through 2026-10-10 19:03 UTC. The historical benchmark was already seen by the feasibility probe and must be described that way.
+- **Strict bar unchanged:** both daily clim28 AND recent7 95% Kyiv-day bootstrap CI lower bounds must be strictly > 0 on the same horizon, on at least 2 of H = 1/3/6. Use 1,000 resamples, seed 0, all 24 modeled regions, flag regional n < 100.
+- Keep logistic whatever the verdict; the verdict controls the claim. Fit the final models on labels completed at MAP_CUTOFF and their Platt calibrators on the preceding 14 days of OOF forecasts. Save `models/logistic.joblib` and its SHA-256. That exact artifact is reserved for step 7's untouched holdout, which remains unscored here.

@@ -491,3 +491,24 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
 - **Test correction:** the first final-calibration test passed even after removing the completed-label purge, because its raw-forecast table already ended at the fit cutoff. Extended the worked example with later rows. The mutation now fails (14 calibration rows instead of the expected 9); the code was restored. Final fit uses 14 completed rows, and the calibrated constant forecast is 4/9.
 - The saved final model is refitted at the cutoff. Serialization must reproduce this final model's forecasts, not the last block model's forecasts (the latter has a different training window).
 - **Verification before any model score:** 89 tests passed, including all five candidates’ end-to-end truncation checks and planted-leak controls. The strengthened final-calibration test also passes after restoration. Existing SciPy deprecation warnings are covered by the existing SciPy < 1.18 pin.
+
+
+### CHOOSE results (selection evidence, not independent)
+
+- Run code: `e789a3fd1bdbee1612dcdcec6e42ac921729fb71`; `evaluate choose` used only rows before 2026-09-12 21:00 UTC. Six sequential blocks, first two calibration warm-up, last four scored. No benchmark or post-map-cutoff outcomes were scored.
+- All 24 modeled regions (23 oblasts plus Kyiv City); scored n = 20,607 / 20,566 / 20,501 for H = 1/3/6. At H = 6 the three smallest regions are Donetska 48, Dnipropetrovska 49, Kharkivska 66, all flagged "quality not verified".
+- Mean calibrated Brier skill versus daily clim28, by the registered rule:
+
+  | Candidate | Mean skill |
+  |---|---:|
+  | logistic | 0.106779 |
+  | gbm_clim | 0.092946 |
+  | gbm_recent | 0.090746 |
+  | gbm | 0.087297 |
+  | catboost | 0.048026 |
+
+- **Winner: logistic**, serving all three horizons. Brier 0.0997 / 0.1112 / 0.1098 (raw 0.1013 / 0.1147 / 0.1120). LightGBM wins H = 1 individually; logistic wins the registered three-horizon average. This is why the strongest survey teams’ model family is not itself a choice rule.
+- The clim28 feature and 60-day recency weights gave small mean gains over unweighted GBM on CHOOSE; neither beat logistic. These comparisons were used for selection and are not independent claims.
+- Candidate error correlations are high (about 0.936–0.996 across distinct candidates). No blend or tuning is introduced. This does not prove that no blend could help; it keeps the approved scope and choice rule.
+- Saved `results/choose_report.md`, `results/choose_summary.json`, `results/choose_forecasts.csv.gz`. Forecast-file SHA-256: `73230d47236c8978da5052ea3e8f6001057cf1e009c0317f64362462c986a726`. An independent NumPy calculation from the CSV reproduces all five mean skills and the winner to < 1e-12; all rows satisfy T + H <= the CHOOSE cutoff.
+- Additional mutation checks caught UTC-day grouping, flagging n = 100, and accepting CI lower bound = 0; all code restored. `python main.py check` reproduces the existing data report byte for byte.

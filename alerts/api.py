@@ -24,7 +24,7 @@ def get(path, tok, tries=3):
             raise RuntimeError(f"HTTP {e.code} for {path}: {body}") from None
         except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, ConnectionError) as e:
             if attempt == tries - 1:
-                raise RuntimeError(f"network error for {path}: {type(e).__name__}") from None
+                raise RuntimeError(f"network error for {path}: {type(e).__name__} {getattr(e, 'reason', '')}".replace(tok, "<redacted>")) from None
             time.sleep(30)
 
 

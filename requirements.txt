@@ -2,3 +2,6 @@ pandas==2.2.3
 numpy==1.26.4
 lightgbm==4.5.0
 scikit-learn==1.5.2
+catboost==1.2.10
+# scikit-learn 1.5.2 passes L-BFGS-B options that SciPy 1.18 removes
+scipy==1.17.1

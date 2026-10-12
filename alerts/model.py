@@ -40,6 +40,13 @@ class Platt:
         return np.log(q / (1 - q)).reshape(-1, 1)
 
 
+def recency(ts, asof, half_life):
+    """0.5 ** (age / half_life) for rows at `ts` fitted at `asof`; None when every row counts the same."""
+    if half_life:
+        return 0.5 ** ((asof - ts) / pd.Timedelta(days=half_life)).to_numpy()
+    return None
+
+
 # A candidate forecaster has a `name`, `fit(rows, hours, asof)` on rows whose labels were known at `asof`, and
 # `predict(rows)`, the raw probability of a start within `hours`. Settings are fixed: nothing is tuned.
 
@@ -52,10 +59,7 @@ class Boosting:
         self.name = "gbm" + ("_clim" if clim else "") + ("_recent" if half_life else "")
 
     def weights(self, ts, asof):
-        """0.5 ** (age / half_life) for rows at `ts` fitted at `asof`; None when every row counts the same."""
-        if self.half_life:
-            return 0.5 ** ((asof - ts) / pd.Timedelta(days=self.half_life)).to_numpy()
-        return None
+        return recency(ts, asof, self.half_life)
 
     def fit(self, rows, hours, asof):
         self.columns = Features.NAMES + [f"clim28_{hours}"] * self.clim
@@ -90,22 +94,37 @@ def _hour_circle(hour):
     return np.c_[np.sin(a), np.cos(a)]
 
 
+def _logit(p):
+    """Probabilities -> log odds, clipped as Platt clips them."""
+    q = np.clip(np.asarray(p, float), 1e-4, 1 - 1e-4)
+    return np.log(q / (1 - q))
+
+
 class Logistic:
     """Logistic regression, a linear model, at sklearn's defaults: the oblast and the weekday one-hot, the hour on a
-    circle, counts and minutes as log1p and standardised."""
+    circle, counts and minutes as log1p and standardised. `refs` adds reference forecasts (`<ref>_<H>`) as inputs, in
+    log odds and standardised."""
 
-    name = "logistic"
+    name, columns = "logistic", Features.NAMES  # class defaults: the model saved before v2 has no columns of its own
     NUMERIC = [f for f in Features.NAMES if f not in ("obl", "hour", "dow")]
 
+    def __init__(self, half_life=None, refs=()):
+        self.half_life, self.refs = half_life, list(refs)
+
     def fit(self, rows, hours, asof):
-        x = ColumnTransformer([("category", OneHotEncoder(handle_unknown="ignore"), ["obl", "dow"]),
-                               ("hour", FunctionTransformer(_hour_circle), ["hour"]),
-                               ("numeric", make_pipeline(FunctionTransformer(np.log1p), StandardScaler()), self.NUMERIC)])
-        self.model = make_pipeline(x, LogisticRegression(max_iter=1000)).fit(rows[Features.NAMES], rows[f"y{hours}"])
+        refs = [f"{r}_{hours}" for r in self.refs]
+        self.columns = Features.NAMES + refs
+        parts = [("category", OneHotEncoder(handle_unknown="ignore"), ["obl", "dow"]),
+                 ("hour", FunctionTransformer(_hour_circle), ["hour"]),
+                 ("numeric", make_pipeline(FunctionTransformer(np.log1p), StandardScaler()), self.NUMERIC)]
+        if refs:
+            parts.append(("refs", make_pipeline(FunctionTransformer(_logit), StandardScaler()), refs))
+        self.model = make_pipeline(ColumnTransformer(parts), LogisticRegression(max_iter=1000)).fit(
+            rows[self.columns], rows[f"y{hours}"], logisticregression__sample_weight=recency(rows.ts, asof, self.half_life))
         return self
 
     def predict(self, rows):
-        return self.model.predict_proba(rows[Features.NAMES])[:, 1]
+        return self.model.predict_proba(rows[self.columns])[:, 1]
 
 
 class ForwardRun:

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alerts.features import ForecastTable
+from alerts.features import Features, ForecastTable
 from alerts.model import Boosting, Forecaster, ForwardRun, Logistic, Platt
 from alerts.splits import Split
 
@@ -90,3 +90,23 @@ def test_progress_logs_each_scored_block_after_its_calibration(capsys):
     # one class, so no AP or AUC
     assert scored == ["H=1 block=2026-09-03 00:00:00+00:00 const: n=4 base=0.000 mean_p=0.556 brier=0.3086 ap=nan auc=nan",
                       "H=1 block=2026-09-04 00:00:00+00:00 const: n=4 base=0.000 mean_p=0.444 brier=0.1975 ap=nan auc=nan"]
+
+
+# one region at the same moment of the week: every feature equal, so a model can only learn the share of starts
+S = pd.Timestamp("2026-09-30 12:00", tz="UTC")
+SAME = {**{f: 1 for f in Features.NAMES}, "obl": 8, "hour": 12.0, "dow": 2}
+
+
+def test_logistic_weights_recent_rows_more():
+    # 10 rows with a start now, 10 without one 70 days (ten weeks) before: with a 70-day half-life the old rows weigh
+    # 1/2 each, so the forecast is 10 / (10 + 5) = 2/3; unweighted it is 1/2
+    rows = pd.DataFrame({**SAME, "ts": [S] * 10 + [S - pd.Timedelta("70D")] * 10, "y1": [1] * 10 + [0] * 10})
+    assert Logistic(half_life=70).fit(rows, 1, S).predict(rows.head(1)) == pytest.approx([2 / 3], abs=1e-3)
+    assert Logistic().fit(rows, 1, S).predict(rows.head(1)) == pytest.approx([1 / 2], abs=1e-3)
+
+
+def test_logistic_can_take_a_reference_forecast_as_an_input():
+    # every feature is the same; only the 7-day rate differs, and a start follows the high rate only
+    rows = pd.DataFrame({**SAME, "ts": S, "recent7_1": [0.1] * 10 + [0.9] * 10, "y1": [0] * 10 + [1] * 10})
+    p = Logistic(refs=["recent7"]).fit(rows, 1, S).predict(rows.iloc[[0, -1]])
+    assert p[0] < .2 and p[1] > .8

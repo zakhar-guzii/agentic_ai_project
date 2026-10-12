@@ -668,3 +668,22 @@ A spec review found two P2 bugs and one P3. Each was reproduced on a synthetic w
   - an alert still on dropped;
   - only regions with records kept.
 - **Unchanged.** `check` rewrote the same data report byte for byte. `predict` reports the moment as already logged. The monthly shares recomputed from `daily` equal the planning numbers.
+
+## 2026-10-12: step 6 (outlook page)
+
+### Decision 8: one offline page from what is already saved
+
+- **The user.** "Now" as a schematic tile map plus the table. The page comes from a separate `main.py page` command; `predict` keeps its behaviour.
+- **Check before planning (nothing new scored):**
+  - Every input exists: the newest logged moment (T = 2026-10-11 12:46 UTC: 13 regions under alert, 11 clear), `data.daily` and the history tables, the frozen benchmark summary and forecast rows, and `live.summary`.
+  - The benchmark CSV recomputes the report's Brier scores: model / clim28 / recent7 = 0.1246 / 0.1348 / 0.1318 at 1 h. Its regional n < 100 flag marks only Dnipropetrovska and Donetska, at every horizon.
+- **Decisions.**
+  1. **`main.py page`, offline**, writes `results/outlook.html`. Now and next hours come from the newest logged moment: exactly what was logged and will be scored, with no forecast recomputed. It refuses when the saved data end after that moment.
+  2. **Self-contained and deterministic.** Inline CSS and SVG, no JavaScript, nothing loaded from outside, no new dependency. The page carries T and the log's `made_at`, never the wall clock, so a rerun writes the same bytes.
+  3. **Each number says what it is.**
+     - Now is the state at T; a forecast made more than 6 h after T is labelled a replay.
+     - Model quality is the historical benchmark: seen by the probe, pooled over 24 regions. Regions with benchmark n < 100 get a ⚠.
+     - The live log reads "nothing scored yet" until step 7.
+     - History stops at MAP_CUTOFF. Marker weeks are markers, not causes; the red share is an upper bound.
+  4. **English text, Ukrainian region names**, as in `predict` and the reports.
+- **Plan:** [research/step-6-plan.md](research/step-6-plan.md).

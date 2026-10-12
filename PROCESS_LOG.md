@@ -824,3 +824,50 @@ The analysis, with every number from `results/metrics_report.md`, is in [researc
 - **Before.** For the `retrain` overwrite test, I removed the `models/v2` clause of its guard with `sed`, then put it back with a reverse `sed`. The guard's plain line was identical in `evaluate` and `holdout`, so the reverse `sed` added the clause to all three. It reached a commit (`a628ac4`). `store` is undefined in those two functions; they refuse earlier anyway, so nothing ran differently, but the code was wrong.
 - **After.** Each guard was restored by its content (`d37e05f`). Against `main`, only `retrain`'s guard differs.
 - **Lesson.** A mutation is undone by an exact replacement that is checked to occur once, never by a pattern.
+
+### v2 result (2026-10-12 ~18:45 Kyiv)
+
+- **Search** (Decision 12, CHOOSE only, 17:42–18:27 Kyiv). Configs tried: logistic all 64, LightGBM 30, CatBoost 9. The files `results/v2/search_<family>.csv` list every one of them.
+- **Consistency.** The config with v1's settings (logistic config 35, 14-day window) reproduced v1's CHOOSE F1, threshold and Brier to 1e-10; the remaining 1e-11 is the JSON rounding in `metrics.json`. `retrain`'s asserts passed: every winner reproduced its search score; v1's rows, labels, clim28 and recent7 equal the frozen CSVs; v1's F1 equals `metrics.json`.
+- **Winners** (CHOOSE F1, 1 / 3 / 6 h, in-sample for tuning):
+
+  | | 1 h | 3 h | 6 h | settings |
+  |---|---|---|---|---|
+  | v1 | .6036 | .7672 | .8161 | step 3 |
+  | v2 logistic | .6038 | .7697 | .8171 | C .1 / C .01 with half-life 60 d / C 10, balanced |
+  | v2 LightGBM | .5976 | .7653 | .8154 | 200 trees; half-life 30 d (1, 3 h), 60 d (6 h) |
+  | v2 CatBoost | .5928 | .7644 | .8140 | 300–600 iterations, lr .03, depth 6; half-life none / 120 d |
+
+  No winner took clim28 or recent7 as inputs.
+- **Check** (`results/v2/report.md`). F1 at the CHOOSE thresholds. v2 − v1, with a paired whole-Kyiv-day bootstrap (1,000, seed 0); this bootstrap is post hoc, not in Decision 12, and the script is `research/v2_compare.py`.
+
+  | v2 − v1 | 1 h | 3 h | 6 h |
+  |---|---|---|---|
+  | benchmark, logistic | +.001 [+.000, +.002] | −.002 [−.005, +.002] | −.001 [−.002, +.000] |
+  | benchmark, LightGBM | −.002 [−.009, +.005] | −.004 [−.010, +.001] | +.001 [−.007, +.011] |
+  | benchmark, CatBoost | −.007 [−.014, −.002] | −.006 [−.012, −.000] | −.005 [−.013, +.003] |
+  | holdout (3 days), logistic / LightGBM / CatBoost | +.001 / −.006 / −.013 | +.006 / −.008 / −.001 | +.000 / +.003 / −.007 |
+
+  - Against recent7, at 6 h no model has a higher F1: on the benchmark .833 for v1 against .841 for recent7, on the holdout .892 against .910.
+  - On the benchmark, AP, AUC and Brier equal v1's to within .002. On the holdout, the trees with recency weights have the better probabilities: at 1 h, AP .648 against v1's .590 and Brier .175 against .179; at 6 h, LightGBM's Brier is .110 against .118. recent7's is .102.
+- **Reading.** The search did not move F1: v2 logistic is v1 within ±.002, LightGBM is level, and CatBoost is slightly worse. The limit is the information in the inputs (ranking within a region, the level under high load), not the settings. What could move it: inputs that carry new information (raion counts; the threat type, logged forward) and calibration per region. v1 stays the registered model; the v2 models are saved and selectable on the page. The untouched check is the data after 2026-10-12 12:43 UTC, after the submission.
+- **Saved.**
+  - `models/v2/logistic.joblib` `4599231d…`, `gbm.joblib` `e16b1835…`, `catboost.joblib` `7d5a6653…`, refitted at 2026-10-12 12:43 UTC.
+  - The forecast rows: `results/v2/forecasts.csv.gz`.
+  - The page shows one button per model (CSS only, no script) and the v2 F1 table. Two renders give the same bytes.
+- **Tests.** 132 pass: 119 before and 13 new.
+  - The v1 guard comes first: `models/logistic.joblib` still gives its frozen holdout forecasts to 1e-12.
+  - Mutations caught on the assertion:
+    - the hour on a 25-hour circle;
+    - no sample weights;
+    - the reference branch dropped;
+    - the label as an input, in all three families. The test LightGBM needs `min_child_samples=5`: at 200 it cannot split off the few positive rows of the toy world.
+    - references joined to the wrong regions;
+    - a stale `scored` flag (a fixed window is caught by the older test);
+    - the seed ignored;
+    - no tie-break;
+    - every radio checked.
+  - Two caught as errors rather than assertions:
+    - an unpicklable step fails at save, the defect that test guards;
+    - without its `models/v2` clause, `retrain` goes on to read the search files, which shows that the guard alone stops it.
+  - The frozen v1 files are unchanged against `main`.

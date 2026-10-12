@@ -1,4 +1,4 @@
-"""Alert Outlook CLI.  usage: python main.py {fetch,check,evaluate,predict,score,holdout,metrics,tune,history,page}"""
+"""Alert Outlook CLI.  usage: python main.py {fetch,check,evaluate,predict,score,holdout,metrics,tune,retrain,history,page}"""
 import argparse
 import os
 from pathlib import Path
@@ -9,6 +9,8 @@ MODEL = ROOT / "models/logistic.joblib"  # the frozen step-3 forecaster
 LOG = ROOT / "results/forecast_log.csv"
 REGISTERED = "ffbce213e5e203c6246c2c2e8f4bfb4461349a5837545e487467973b18219243"  # the model SHA-256 Decision 10 scores
 REGISTRATION = "7ff31a24476be57ca7f81fe3bf1c7f52c32a7094"  # the holdout pre-registration commit (Decision 10)
+REGISTRATION_V2 = "ad82822125b2c3eae07dfb713562606df3c468d3"  # the v2 search pre-registration commit (Decision 12)
+FAMILIES = {"logistic": "logistic", "gbm": "LightGBM", "catboost": "CatBoost"}  # v2 model file -> its name on the page
 # 23 oblasts + Kyiv City; Luhansk (16) and Crimea are under a permanent alert and are not fetched
 OBLAST_UIDS = [3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31]
 
@@ -157,7 +159,7 @@ def evaluate(args):
     report = dest / f"{stage}_report.md"
     forecasts = dest / f"{stage}_forecasts.csv.gz"
     summary_path = dest / f"{stage}_summary.json"
-    if any(p.exists() for p in (report, forecasts, summary_path)):
+    if any(p.exists() for p in (report, forecasts, summary_path)) or any(store.glob("*.joblib")):
         raise SystemExit(f"{stage} artifacts already exist; refusing to overwrite a frozen evaluation")
     candidates = [Boosting(), Boosting(clim=True), Boosting(half_life=60), CatBoost(), Logistic()]
     if stage == "benchmark":
@@ -326,6 +328,132 @@ def tune(args):
               f"{json.dumps(config)}", flush=True)
 
 
+def _v1_frozen():
+    """v1's frozen forecasts on CHOOSE blocks 3-6, the benchmark and the holdout, as `metrics` reads them: obl, ts,
+    hours, y, v1, clim28, recent7, period."""
+    import pandas as pd
+    from alerts.splits import BENCHMARK, CHOOSE
+    read = lambda stage: pd.read_csv(ROOT / f"results/{stage}_forecasts.csv.gz", parse_dates=["ts"])
+    ch, be, ho = read("choose"), read("benchmark"), read("holdout").rename(columns={"model": "logistic"})
+    parts = {"choose": ch[ch.scored & (ch.ts >= CHOOSE[0])], "benchmark": be[be.scored & (be.ts >= BENCHMARK[0])],
+             "holdout": ho}
+    cols = ["obl", "ts", "hours", "y", "logistic", "clim28", "recent7"]
+    return pd.concat([x[cols].assign(period=k) for k, x in parts.items()], ignore_index=True).rename(
+        columns={"logistic": "v1"})
+
+
+def retrain(args):
+    """Offline, once (Decision 12): each family's search winners run forward over CHOOSE, BENCHMARK and the holdout and
+    are scored next to v1, clim28 and recent7, with every alarm threshold from CHOOSE. Then they are refitted on every
+    label known where the saved data end and saved, one file per family. Refuses to overwrite its artifacts."""
+    import gzip
+    import hashlib
+    import json
+    import subprocess
+    import numpy as np
+    import pandas as pd
+    from alerts import data as D
+    from alerts.evaluate import Scores
+    from alerts.features import HOURS
+    from alerts.model import Forecaster, ForwardRun, best, candidate
+    from alerts.splits import BENCHMARK, CHOOSE
+    dest, store = ROOT / "results/v2", ROOT / "models/v2"
+    report, forecasts, summary_path = dest / "report.md", dest / "forecasts.csv.gz", dest / "summary.json"
+    if any(p.exists() for p in (report, forecasts, summary_path)) or any(store.glob("*.joblib")):
+        raise SystemExit("v2 artifacts already exist; refusing to overwrite them")
+    search = pd.concat([pd.read_csv(p) for p in sorted(dest.glob("search_*.csv"))], ignore_index=True)
+    winners, end = best(search), D.api_asof(OBLAST_UIDS)
+    rows, v1 = _v2_rows(end), _v1_frozen()
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+    tables, finals = {h: v1[v1.hours == h].drop(columns="hours") for h in HOURS}, {}
+    for family in FAMILIES:
+        models, calibrators, horizons = {}, {}, {}
+        for h in HOURS:
+            w = winners.loc[(family, h)]
+            config, window = json.loads(w.params), pd.Timedelta(days=int(w.window))
+            c = candidate(family, config)
+            print(f"{family} {h} h: forward over CHOOSE, BENCHMARK and the holdout, {json.dumps(config)}", flush=True)
+            raw = ForwardRun([c], window=window).run(rows, h, [CHOOSE, BENCHMARK, (D.MAP_CUTOFF, end, 1)])
+            first = sorted(raw[raw.ts < CHOOSE[1]].block.unique())[2]  # CHOOSE block 3, as in the search
+            held = raw[raw.block >= first]
+            chosen = Scores(held[held.ts < CHOOSE[1]], h)
+            assert chosen.threshold(family) == w.threshold and abs(
+                chosen.classes(family, w.threshold).loc["all"].f1 - w.f1) < 1e-9, f"{family} {h} h: the search is not reproduced"
+            t = tables[h].merge(held[["obl", "ts", f"y{h}", f"clim28_{h}", f"recent7_{h}", family]], on=["obl", "ts"],
+                                how="outer", indicator=True)
+            assert (t._merge == "both").all() and (t.y == t[f"y{h}"]).all(), f"{family} {h} h: not v1's rows and labels"
+            for ref in ("clim28", "recent7"):
+                assert np.allclose(t[ref], t[f"{ref}_{h}"], rtol=0, atol=1e-12), f"{family} {h} h: {ref} is not v1's"
+            tables[h] = t.drop(columns=["_merge", f"y{h}", f"clim28_{h}", f"recent7_{h}"])
+            f = ForwardRun([c], window=window).final(rows, {h: raw}, end)[family]
+            models[h], calibrators[h] = f.models[h], f.calibrators[h]
+            horizons[h] = dict(config=config, window_days=int(w.window), threshold=float(w.threshold),
+                               choose_f1=float(w.f1), counts=f.meta["counts"][h], columns=list(f.models[h].columns))
+        finals[family] = Forecaster(models, calibrators, dict(
+            name=f"{family} v2", train_start=f.meta["train_start"], asof=end, horizons=horizons,
+            versions=f.meta["versions"], git_commit=commit, registration=REGISTRATION_V2))
+    # scores: thresholds from CHOOSE; v1, clim28 and recent7 as in `metrics`
+    cols, pooled = ["v1", *FAMILIES, "clim28", "recent7"], []
+    for h, t in tables.items():
+        t = t.rename(columns={"y": f"y{h}"})
+        for col in cols:
+            thr = float(winners.loc[(col, h)].threshold) if col in FAMILIES else Scores(t[t.period == "choose"], h).threshold(col)
+            for period, part in t.groupby("period", sort=False):
+                sc = Scores(part, h)
+                pooled.append(dict(horizon=h, period=period, forecast=col, threshold=thr, brier=sc.brier(col),
+                                   **sc.classes(col, thr).loc["all"]))
+    table = pd.DataFrame(pooled).astype({"n": int, "pos": int})
+    frozen = pd.DataFrame(json.loads((ROOT / "results/metrics.json").read_text())["pooled"])
+    check = table[table.forecast == "v1"].merge(frozen[frozen.forecast == "logistic"], on=["horizon", "period"])
+    assert len(check) == 9 and np.allclose(check.f1_x, check.f1_y, rtol=0, atol=1e-9), "v1's F1 differs from metrics.json"
+    # artifacts
+    store.mkdir(parents=True, exist_ok=True)
+    digests = {}
+    for family, forecaster in finals.items():
+        forecaster.save(store / f"{family}.joblib")
+        digests[family] = hashlib.sha256((store / f"{family}.joblib").read_bytes()).hexdigest()
+    long = pd.concat([t.assign(hours=h) for h, t in tables.items()], ignore_index=True)
+    forecasts.write_bytes(gzip.compress(long.to_csv(index=False).encode(), mtime=0))
+    tried = search.groupby("family").config.nunique().to_dict()
+    win = winners.reset_index()
+    summary = dict(stage="v2", git_commit=commit, registration_commit=REGISTRATION_V2, end=str(end),
+                   configs_tried=tried, winners=json.loads(win.to_json(orient="records")),
+                   pooled=json.loads(table.to_json(orient="records")), model_sha256=digests,
+                   forecasts_sha256=hashlib.sha256(forecasts.read_bytes()).hexdigest())
+    summary_path.write_text(json.dumps(summary, indent=2) + "\n")
+    names = {"v1": "v1 logistic", **{k: f"v2 {v}" for k, v in FAMILIES.items()}, "clim28": "clim28", "recent7": "recent7"}
+    win.insert(2, "model", win.family.map(lambda k: f"v2 {FAMILIES[k]}"))
+    out = ["# v2 report", "",
+           f"Decision 12, registered at `{REGISTRATION_V2}` before the search. Generated offline, once, by "
+           f"`python main.py retrain` at commit `{commit}`.",
+           f"- **Search:** CHOOSE only (to {CHOOSE[1]}). Configs tried in the seeded order within the box: "
+           + ", ".join(f"{FAMILIES[k]} {v}" for k, v in tried.items()) + ". Every config and its scores: "
+           "`results/v2/search_<family>.csv`.",
+           "- **Winner** per family and horizon: the highest pooled F1 on CHOOSE blocks 3-6 at its max-F1 threshold; that "
+           "threshold is then fixed. On CHOOSE the scores are in-sample.",
+           "- **Benchmark and holdout:** the winners run forward, each block fitted on the past only, with a Platt on the "
+           "window before it. Neither period was used for tuning, but both were seen before (the benchmark by the probe "
+           "and the weak-spot analysis, the holdout by step 7 and the weak-spot analysis), so they are not independent "
+           f"checks. The untouched check is the data after {end}, scored after the submission.",
+           "- Thresholds of v1, clim28 and recent7: max F1 on CHOOSE, as in `metrics_report.md`. f1_always is the F1 of "
+           "always saying yes.",
+           "\n## Winners\n", md(win.set_index(["family", "hours"])[["model", "f1", "threshold", "window", "precision",
+                                                                      "recall", "params"]], "{:.4f}")]
+    for h in HOURS:
+        part = table[table.horizon == h]
+        shown = part.set_index(part.period + ", " + part.forecast.map(names)).rename_axis("period, forecast")
+        out += [f"\n## Horizon {h} h\n", md(shown[["threshold", "precision", "recall", "f1", "f1_always", "ap", "auc",
+                                                  "brier", "n"]], "{:.4f}")]
+    out += ["\n## Saved models\n", *(f"- `models/v2/{k}.joblib` ({FAMILIES[k]}): SHA-256 `{v}`" for k, v in digests.items()),
+            f"\nEach is refitted on every label known at {end}, with a Platt on the window before it; the meta holds each "
+            "horizon's config, window and threshold. Load only these trusted files (joblib uses pickle).",
+            f"\nForecast rows: `results/v2/forecasts.csv.gz`, SHA-256 `{summary['forecasts_sha256']}`."]
+    report.write_text("\n".join(out) + "\n")
+    print(md(table[table.period != "choose"].set_index(table.horizon.astype(str) + " h, " + table.period + ", "
+                                                      + table.forecast)[["threshold", "precision", "recall", "f1"]], "{:.3f}"))
+    print(f"wrote {report.relative_to(ROOT)} and models/v2/*.joblib")
+
+
 def _names():
     """Region id -> its name in regions.json."""
     import json
@@ -394,7 +522,7 @@ def holdout(args):
     from alerts.model import Forecaster
     dest = ROOT / "results"
     report, forecasts, summary_path = (dest / f"holdout_{x}" for x in ("report.md", "forecasts.csv.gz", "summary.json"))
-    if any(p.exists() for p in (report, forecasts, summary_path)):
+    if any(p.exists() for p in (report, forecasts, summary_path)) or any(store.glob("*.joblib")):
         raise SystemExit("holdout artifacts already exist; refusing to overwrite the frozen final run")
     if hashlib.sha256(MODEL.read_bytes()).hexdigest() != REGISTERED:
         raise SystemExit("models/logistic.joblib is not the registered model")
@@ -787,6 +915,8 @@ def main():
     t.add_argument("family", choices=["logistic", "gbm", "catboost"])
     t.add_argument("--minutes", type=float, default=45, help="start no config after this many minutes")
     t.set_defaults(func=tune)
+    sub.add_parser("retrain", help="offline, once: the v2 winners forward, their report, and the saved v2 models"
+                   ).set_defaults(func=retrain)
     sub.add_parser("metrics", help="offline: precision, recall, F1, AP and ROC-AUC of the frozen forecasts, per region "
                    "and pooled, write results/metrics_report.md").set_defaults(func=metrics)
     sub.add_parser("holdout", help="offline, once: the frozen model on the untouched holdout, the live-log score and "

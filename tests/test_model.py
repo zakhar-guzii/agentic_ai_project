@@ -3,7 +3,8 @@ import pandas as pd
 import pytest
 
 from alerts.features import Features, ForecastTable
-from alerts.model import Boosting, Forecaster, ForwardRun, Logistic, Platt, best, configs
+from alerts.baselines import Climatology, RecentLevel
+from alerts.model import REFS, Boosting, Forecaster, ForwardRun, Logistic, Platt, best, candidate, configs
 from alerts.splits import Split
 
 
@@ -70,6 +71,20 @@ def test_a_saved_forecaster_forecasts_the_same_after_loading(tmp_path):
         assert loaded.predict(later).equals(forecaster.predict(later))
         assert list(loaded.predict(later).columns) == ["p1", "p3"]
         assert (loaded.meta["train_start"], loaded.meta["asof"]) == (first, asof)
+
+
+def test_saved_v2_forecasters_of_all_three_families_forecast_the_same_after_loading(tmp_path):
+    first, asof = pd.Timestamp("2026-09-28", tz="UTC"), pd.Timestamp("2026-10-03", tz="UTC")
+    rows = ForecastTable(world(), first, pd.Timestamp("2026-10-04", tz="UTC")).rows
+    rows = rows.join(Climatology(28).predict(rows)).join(RecentLevel().predict(rows))  # the reference inputs
+    settings = {"logistic": dict(C=0.1), "gbm": dict(n_estimators=30, min_child_samples=5), "catboost": dict(iterations=30)}
+    run = ForwardRun([candidate(f, {"refs": tuple(REFS), "half_life": 30, **p}) for f, p in settings.items()],
+                     split=Split(first, asof, asof, asof), window=pd.Timedelta("1D"))
+    raws = {h: run.run(rows, h, [(pd.Timestamp("2026-09-30", tz="UTC"), asof, 3)]) for h in (1, 3)}
+    later = rows[rows.ts >= asof]
+    for name, forecaster in run.final(rows, raws, asof).items():
+        forecaster.save(tmp_path / f"{name}.joblib")
+        assert Forecaster.load(tmp_path / f"{name}.joblib").predict(later).equals(forecaster.predict(later))
 
 
 def test_final_forecaster_calibrates_only_on_completed_oof_labels():

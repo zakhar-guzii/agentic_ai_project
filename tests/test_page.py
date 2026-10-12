@@ -56,3 +56,16 @@ def test_the_map_has_one_tile_per_region_coloured_by_its_state_now():
              if "tile" in t.get("class").split()}
     assert len(tiles) == 24
     assert (tiles["r8"][0], tiles["r5"][0], tiles["r27"]) == ("tile red", "tile yellow", ("tile clear", "34%"))
+
+
+def test_the_live_score_shows_replays_apart_with_the_revision_check():
+    s = pd.DataFrame({"hours": [1, 3], "forecast": ["replay", "live"], "n": [11, 11], "moments": [1, 1],
+                      "base_rate": [0.2, 0.4], "model": [0.1, 0.2], "clim28": [0.12, 0.22], "recent7": [0.11, 0.21],
+                      "revised_rows": [0, 2], "still_clear": [11, 10], "model_logged": [0.1, 0.19],
+                      "model_recomputed": [0.1, 0.18]}).set_index(["hours", "forecast"])
+    table = ET.fromstring(page.scored(s))
+    heads = [th.text for th in table.iter("th")]
+    assert [h for h in heads if h in ("replay", "live")] == ["replay", "live"]  # one row per kind, never pooled
+    for col in ("still clear", "Brier, logged", "Brier, recomputed", "revised rows"):
+        assert col in heads
+    assert "0.1800" in [td.text for td in table.iter("td")]  # the recomputed Brier of the live 3 h row

@@ -53,6 +53,12 @@ def score(log, records, asof, model):
     return pd.concat(out, ignore_index=True) if out else log.iloc[:0].reindex(columns=[*log.columns, *new])
 
 
+NOTE = ("`live` rows were made before their window closed; `replay` rows after it, from a saved pull, so they are "
+        "not a test of forecasting. Revision check: on the `still_clear` rows (clear at T in the current records too), "
+        "`model_logged` is the Brier score of the logged forecasts and `model_recomputed` that of the forecasts on the "
+        "recomputed features.")
+
+
 def summary(scored):
     """Per horizon whose windows have closed and per kind of forecast: `live`, made before its window closed, or
     `replay`, made after it (Decision 6), so the two are never pooled. n, and the Brier score of the model, clim28 and

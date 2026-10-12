@@ -91,6 +91,17 @@ def tiles(rows, names):
     return "".join(out) + "</div>"
 
 
+LIVE = {"n": "n", "moments": "moments", "base_rate": "base rate", "model": "Brier, model", "clim28": "Brier, clim28",
+        "recent7": "Brier, recent7", "revised_rows": "revised rows", "still_clear": "still clear",
+        "model_logged": "Brier, logged", "model_recomputed": "Brier, recomputed"}
+
+
+def scored(summary):
+    """The live score (`live.summary`) as an HTML table: one row per horizon and kind of forecast, live or replay,
+    with the revision check."""
+    return f'<div class="scroll">{summary.rename(columns=LIVE).to_html(border=0, float_format="{:.4f}".format)}</div>'
+
+
 # alert levels wear the status colours (critical, warning) and always come with an icon or a label; the three horizons
 # take categorical slots 1-3, validated all-pairs in both modes
 CSS = """

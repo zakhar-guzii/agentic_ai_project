@@ -772,3 +772,22 @@ A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec f
   - The holdout Brier recomputed from the CSV with NumPy equals the report to 1e-12.
   - A second `holdout` refuses. Two `page` runs give the same bytes.
 - **Frozen.** The holdout artifacts and the forecast log are final for the submission. No `predict` after this.
+
+## 2026-10-12: classification metrics and weak spots (requested by the user)
+
+### Decision 11: precision / recall / F1 per region and pooled, post hoc
+
+- **The user.** Brier and skill alone are poor logging: add classic precision, recall and F1, per region and pooled, computed and logged in the code; then find the model's weak spots and what to improve. Report only: the model is not changed (the holdout is spent, Decision 10).
+- **Threshold (the user's choice).** An alarm is p ≥ t. For each horizon and each forecast (logistic, clim28, recent7), t maximises F1 on the CHOOSE scored rows (grid .01–.99, the lowest wins a tie), then is applied unchanged to the benchmark and the holdout. No row after CHOOSE sets a threshold. Threshold-free AP and ROC-AUC are reported next to it, and per region the F1 of always saying yes, 2b / (1 + b), because a region with a high base rate gets a high F1 for nothing.
+- **Code.** `Scores.classes` and `Scores.threshold` (`alerts/evaluate.py`); `ForwardRun.run(progress=True)` prints n, base rate, mean p, Brier, AP and AUC of every calibrated block; `evaluate` adds a classification table per candidate and horizon and `classification` to its summary (for a future run: the frozen artifacts refuse to be overwritten); `main.py metrics` writes `results/metrics_report.md` and `results/metrics.json` from the frozen forecast files.
+- **Status.** Descriptive. No threshold, model or claim changed because of these numbers; the holdout numbers are a re-reading of the registered run, not a new test.
+
+### Wrong #22 (mine): the same hard-coded insertion index again
+
+- **Before.** The first `metrics` render put the pooled table after the first per-region heading: `out[7:7]` counted one line too many. This is the bug the step-7 report render had.
+- **After.** `head = len(out)` before the loop, as `holdout` does. The report was re-rendered; two runs give the same bytes.
+- **Lesson.** An insertion point is taken from the list, never counted by hand.
+
+### Weak spots (2026-10-12)
+
+The analysis, with every number from `results/metrics_report.md`, is in [research/weak-spots.md](research/weak-spots.md). In short: the model ranks regions well and moments within a region poorly; on the front line it says yes always, in the far west it never does; under high load its level lags (the global 14-day Platt), which is where recent7 beats it; at 6 h it ranks no better than clim28.

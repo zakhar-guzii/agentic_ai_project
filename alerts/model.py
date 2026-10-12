@@ -1,6 +1,8 @@
 """The calibrated forecaster: P(an episode starts in [T, T + H)) for each forecast row."""
 import copy
 import importlib.metadata
+import itertools
+import random
 import subprocess
 from pathlib import Path
 
@@ -137,6 +139,44 @@ class Logistic(Candidate):
         self.model = make_pipeline(ColumnTransformer(parts), LogisticRegression(**{"max_iter": 1000, **self.params})).fit(
             rows[self.columns], rows[f"y{hours}"], logisticregression__sample_weight=recency(rows.ts, asof, self.half_life))
         return self
+
+
+# Decision 12, the v2 search. Each family also searches the inputs and the recency half-life; the Platt window
+# (WINDOWS, days) is searched by recalibrating each config's raw forecasts, so it is not in a config. FIXED settings
+# stay the same in the search and the final fit, so a refit reproduces the search.
+REFS = ["clim28", "recent7"]
+SHARED = {"refs": [(), tuple(REFS)], "half_life": [None, 30, 60, 120]}
+SPACE = {"logistic": {"C": [0.01, 0.1, 1, 10], "class_weight": [None, "balanced"]},
+         "gbm": {"n_estimators": [200, 400, 800], "learning_rate": [0.02, 0.05, 0.1], "num_leaves": [15, 31, 63, 127],
+                 "min_child_samples": [50, 200, 1000], "subsample": [0.7, 1.0], "colsample_bytree": [0.6, 0.8, 1.0],
+                 "reg_lambda": [0, 1, 10]},
+         "catboost": {"iterations": [300, 600, 1000], "learning_rate": [0.03, 0.1], "depth": [4, 6],
+                      "l2_leaf_reg": [1, 3, 10]}}
+FIXED = {"logistic": {}, "gbm": {"n_jobs": 6, "deterministic": True, "force_row_wise": True},
+         "catboost": {"thread_count": 7}}
+WINDOWS = (7, 14)
+
+
+def configs(family, seed=0):
+    """Every config of `family` ({"refs", "half_life", and the parameters}) in a fixed random order."""
+    space = {**SHARED, **SPACE[family]}
+    grid = [dict(zip(space, values)) for values in itertools.product(*space.values())]
+    random.Random(seed).shuffle(grid)
+    return grid
+
+
+def candidate(family, config):
+    """The candidate a config describes, with the family's FIXED settings."""
+    c = dict(config)
+    model = {"logistic": Logistic, "gbm": Boosting, "catboost": CatBoost}[family]
+    return model(half_life=c.pop("half_life"), refs=c.pop("refs"), params={**c, **FIXED[family]}, name=family)
+
+
+def best(search):
+    """The winner per family and horizon (Decision 12): the highest CHOOSE F1; on a tie, the first config in the seeded
+    order (then the shorter window)."""
+    s = search.sort_values(["family", "hours", "config", "window"], kind="stable")
+    return s.loc[s.groupby(["family", "hours"]).f1.idxmax()].set_index(["family", "hours"])
 
 
 class ForwardRun:

@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from alerts.features import Features, ForecastTable
-from alerts.model import Boosting, Forecaster, ForwardRun, Logistic, Platt
+from alerts.model import Boosting, Forecaster, ForwardRun, Logistic, Platt, best, configs
 from alerts.splits import Split
 
 
@@ -117,3 +117,19 @@ def test_recalibrating_a_run_with_another_window_equals_running_with_it():
     three_days = ForwardRun([Constant()], split=split, window=pd.Timedelta("3D")).run(ROWS, 1, ranges)
     two_days = ForwardRun([Constant()], split=split, window=pd.Timedelta("2D"))
     assert two_days.calibrate(three_days, 1).equals(two_days.run(ROWS, 1, ranges))
+
+
+def test_configs_come_in_a_fixed_order_without_repeats():
+    # catboost: inputs 2 x half-life 4 x iterations 3 x learning rate 2 x depth 2 x l2 3
+    order = configs("catboost")
+    assert order == configs("catboost") != configs("catboost", seed=1)
+    assert len(order) == 288 == len({repr(sorted(c.items())) for c in order})
+
+
+def test_the_winner_has_the_highest_f1_per_family_and_horizon_and_the_first_config_on_a_tie():
+    search = pd.DataFrame([dict(family="gbm", hours=1, config=0, window=7, f1=.60),
+                           dict(family="gbm", hours=1, config=2, window=7, f1=.65),
+                           dict(family="gbm", hours=1, config=1, window=14, f1=.65),  # ties config 2, came first
+                           dict(family="gbm", hours=3, config=0, window=14, f1=.70),
+                           dict(family="logistic", hours=1, config=5, window=7, f1=.50)])
+    assert best(search).config.to_dict() == {("gbm", 1): 1, ("gbm", 3): 0, ("logistic", 1): 5}

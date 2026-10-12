@@ -1,10 +1,12 @@
-"""Alert Outlook CLI.  usage: python main.py {fetch,check,evaluate}"""
+"""Alert Outlook CLI.  usage: python main.py {fetch,check,evaluate,predict,score}"""
 import argparse
 import os
 from pathlib import Path
 
 ROOT = Path(__file__).parent
 API_RAW = ROOT / "data/raw/alerts_in_ua"
+MODEL = ROOT / "models/logistic.joblib"  # the frozen step-3 forecaster
+LOG = ROOT / "results/forecast_log.csv"
 # 23 oblasts + Kyiv City; Luhansk (16) and Crimea are under a permanent alert and are not fetched
 OBLAST_UIDS = [3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31]
 
@@ -260,6 +262,54 @@ def evaluate(args):
     print(json.dumps(summary, indent=2), flush=True)
 
 
+def predict(args):
+    """Offline: every region at the moment T where the saved history ends (no download, no training); print, then log."""
+    import hashlib
+    import json
+    import pandas as pd
+    from alerts import data as D, live
+    from alerts.features import HOURS
+    from alerts.model import Forecaster
+    T, made = D.api_asof(OBLAST_UIDS), pd.Timestamp.now(tz="UTC").floor("s")
+    rows = live.forecast(D.history(D.load_map(), D.load_api()), T, Forecaster.load(MODEL)).assign(
+        made_at=made, model_sha256=hashlib.sha256(MODEL.read_bytes()).hexdigest())
+    names = {int(x["regionId"]): x["regionName"] for x in json.loads(D.REGIONS.read_text())["states"]}
+    table = pd.DataFrame({"now": rows.level.map({"red": "🔴 alert", "yellow": "🟡 alert"}).fillna("clear").to_numpy(),
+                          **{f"{h} h": (rows[f"p{h}"] * 100).map("{:.0f}%".format).where(rows.under == 0, "").to_numpy()
+                             for h in HOURS}}, index=pd.Index(rows.obl.map(names), name="region")).sort_index()
+    print(f"Data as of {T.tz_convert('Europe/Kyiv'):%Y-%m-%d %H:%M} Kyiv ({T:%H:%M} UTC), "
+          f"{(made - T) / pd.Timedelta('1h'):.1f} h ago. P(a new alert starts within 1/3/6 h) for regions clear then.\n")
+    print(md(table))
+    print(f"\n{'logged to' if live.log(rows, LOG) else 'this moment is already in'} {LOG.relative_to(ROOT)}")
+
+
+def score(args):
+    """Offline: Brier scores of the logged forecasts whose windows have closed inside the saved data."""
+    import pandas as pd
+    from alerts import data as D, live
+    from alerts.features import HOURS
+    from alerts.model import Forecaster
+    if not LOG.exists():
+        raise SystemExit("no forecast logged yet (python main.py predict)")
+    asof = D.api_asof(OBLAST_UIDS)
+    scored = live.score(pd.read_csv(LOG, parse_dates=["ts", "made_at"]), D.history(D.load_map(), D.load_api()), asof,
+                        Forecaster.load(MODEL))
+    out = []
+    for h in HOURS:
+        part = scored[scored[f"y{h}"].notna()]
+        brier = lambda col: float(((part[col] - part[f"y{h}"]) ** 2).mean())
+        if len(part):
+            out.append(dict(hours=h, n=len(part), moments=part.ts.nunique(),
+                            made_before_window_closed=int((part.made_at < part.ts + pd.Timedelta(hours=h)).sum()),
+                            base_rate=float(part[f"y{h}"].mean()), model=brier(f"p{h}"), clim28=brier(f"clim28_{h}"),
+                            recent7=brier(f"recent7_{h}"), revised_rows=int(part.revised.sum()),
+                            model_on_revised_features=brier(f"final_p{h}")))
+    if not out:
+        print(f"nothing to score: no logged window closes before {asof}, where the saved data end")
+        return
+    print(md(pd.DataFrame(out).set_index("hours"), "{:.4f}"))
+
+
 def _frozen_api(directory):
     """Use the original pull without duplicating the loader or changing its directory contract."""
     import tempfile
@@ -279,6 +329,10 @@ def main():
     e = sub.add_parser("evaluate", help="offline: model choice or the registered historical benchmark")
     e.add_argument("stage", choices=["choose", "benchmark"])
     e.set_defaults(func=evaluate)
+    sub.add_parser("predict", help="offline: forecast every region where the saved data end, print it, log it"
+                   ).set_defaults(func=predict)
+    sub.add_parser("score", help="offline: score logged forecasts whose windows closed inside the saved data"
+                   ).set_defaults(func=score)
     args = ap.parse_args()
     args.func(args)
 

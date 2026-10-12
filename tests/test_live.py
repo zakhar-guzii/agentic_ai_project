@@ -119,3 +119,13 @@ def test_features_revised_after_the_log_are_flagged(tmp_path):
     # Lviv's own minutes under alert, and its 5 neighbours' nb_alert_min_24h
     assert sorted(scored.obl[scored.revised]) == sorted([LVIV] + NEIGHBOURS[LVIV])
     assert scored.filter(like="final_p").notna().all().all()  # the forecasts on the revised features, for their Brier
+
+
+# --- the saved alerts.in.ua pulls (skipped before the first one) ---
+@pytest.mark.skipif(not list(D.API_DIR.glob("*/MANIFEST.json")), reason="no alerts.in.ua pull saved yet")
+def test_the_forecast_on_the_saved_data():
+    from main import OBLAST_UIDS
+    now = live.forecast(D.history(D.load_map(), D.load_api()), D.api_asof(OBLAST_UIDS), MODEL)
+    under = now.under == 1
+    assert len(now) == 24 and now.level[under].isin(["yellow", "red"]).all() and now.level[~under].isna().all()
+    assert now.loc[~under, ["p1", "p3", "p6"]].apply(lambda c: c.between(0, 1)).all().all()

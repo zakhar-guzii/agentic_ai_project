@@ -711,3 +711,18 @@ A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec f
   - **After.** `live.summary` gives one row per horizon and kind: `live` when `made_at < T + H`, otherwise `replay`. The page shows the whole table through `page.scored`, with the revision check and the note that `score` prints too (`live.NOTE`).
   - **Tests.** 114 pass: 112 before, two test-first. Worked example: a forecast made at T + 1 h, the moment its 1 h window closed, is a replay at 1 h and live at 3 h. Mutation `made_at <= T + H`: caught on the assertion.
   - **Unchanged.** Nothing is scored yet, so `outlook.html` is byte-identical.
+
+## 2026-10-12: step 7 (final run)
+
+### Decision 10: the holdout pre-registration (committed before the step-7 fetch)
+
+- **The user.** One `fetch` in step 7. The live log then holds only the 2026-10-11 replay; the new moment T2 is logged, but none of its windows closes inside the data, so no live forecast is scored.
+- **Registered before the holdout is opened (Decision 4.5):**
+  1. **Model:** exactly `models/logistic.joblib`, SHA-256 `ffbce213e5e203c6246c2c2e8f4bfb4461349a5837545e487467973b18219243`. No refit, no recalibration, no tuning; the model is kept whatever the result.
+  2. **Rows, as in the benchmark:** 30-min moments on the :00/:30 grid, regions clear at T, all 24 regions, T in [MAP_CUTOFF, END), END = `api_asof` of the step-7 pull; for horizon H only rows with T + H ≤ END.
+  3. **References:** daily clim28 (counted at 00:00 Kyiv) and recent7, computed as for the benchmark.
+  4. **Scoring:** Brier of the model, clim28 and recent7; skill with the registered Kyiv-day bootstrap (1,000 resamples, seed 0); the strict bar as registered; skills per Kyiv day; per region n with the n < 100 flag; reliability. With about 3 Kyiv days the day bootstrap is expected to be wide and probably inconclusive: it is reported as it comes, no method changes afterwards.
+  5. **Live log:** `live.summary`, live and replay apart (Wrong #20).
+  6. **Late revisions:** the fresh pull vs `20261011T1247Z`, same `id`: changed `started_at`, changed non-null `finished_at`, changed `alert_level`; how many start before MAP_CUTOFF.
+  7. **Freeze:** `main.py holdout` runs once and refuses to overwrite its artifacts; no `predict` after it before submission.
+- **Plan:** [research/step-7-plan.md](research/step-7-plan.md).

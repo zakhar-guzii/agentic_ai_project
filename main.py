@@ -422,7 +422,7 @@ def retrain(args):
                    forecasts_sha256=hashlib.sha256(forecasts.read_bytes()).hexdigest())
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")
     names = {"v1": "v1 logistic", **{k: f"v2 {v}" for k, v in FAMILIES.items()}, "clim28": "clim28", "recent7": "recent7"}
-    win.insert(2, "model", win.family.map(lambda k: f"v2 {FAMILIES[k]}"))
+    win.index = win.family.map(lambda k: f"v2 {FAMILIES[k]}") + ", " + win.hours.astype(str) + " h"
     out = ["# v2 report", "",
            f"Decision 12, registered at `{REGISTRATION_V2}` before the search. Generated offline, once, by "
            f"`python main.py retrain` at commit `{commit}`.",
@@ -437,8 +437,8 @@ def retrain(args):
            f"checks. The untouched check is the data after {end}, scored after the submission.",
            "- Thresholds of v1, clim28 and recent7: max F1 on CHOOSE, as in `metrics_report.md`. f1_always is the F1 of "
            "always saying yes.",
-           "\n## Winners\n", md(win.set_index(["family", "hours"])[["model", "f1", "threshold", "window", "precision",
-                                                                      "recall", "params"]], "{:.4f}")]
+           "\n## Winners\n", md(win.rename_axis("winner")[["f1", "threshold", "window", "precision", "recall",
+                                                              "config", "params"]], "{:.4f}")]
     for h in HOURS:
         part = table[table.horizon == h]
         shown = part.set_index(part.period + ", " + part.forecast.map(names)).rename_axis("period, forecast")
@@ -449,8 +449,9 @@ def retrain(args):
             "horizon's config, window and threshold. Load only these trusted files (joblib uses pickle).",
             f"\nForecast rows: `results/v2/forecasts.csv.gz`, SHA-256 `{summary['forecasts_sha256']}`."]
     report.write_text("\n".join(out) + "\n")
-    print(md(table[table.period != "choose"].set_index(table.horizon.astype(str) + " h, " + table.period + ", "
-                                                      + table.forecast)[["threshold", "precision", "recall", "f1"]], "{:.3f}"))
+    shown = table[table.period != "choose"]
+    print(md(shown.set_index(shown.horizon.astype(str) + " h, " + shown.period + ", " + shown.forecast)[
+        ["threshold", "precision", "recall", "f1"]], "{:.3f}"))
     print(f"wrote {report.relative_to(ROOT)} and models/v2/*.joblib")
 
 

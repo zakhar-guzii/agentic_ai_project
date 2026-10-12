@@ -599,3 +599,28 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
   - a clear region has no level (on the real pull).
 - **Small finding.** The CSV round trip keeps the features exact: the revision check also passes with exact equality. `np.isclose` stays as a margin.
 - **Unchanged.** `check` rewrote the same data report byte for byte, and `evaluate` still refuses to overwrite.
+
+### Code review of step 4 (2026-10-12)
+
+A spec review found two P2 bugs and one P3. Each was reproduced on a synthetic worked example before the plan, then fixed test-first; each new test failed before its fix.
+
+- **Wrong #15: `score` crashed when every logged region was under alert.**
+  - **Before.** Only clear rows are scored. A log whose rows were all under alert left nothing, and `pd.concat` of nothing raised `ValueError`: the trap of Wrong #8 again. Such a moment is real: on 2026-08-04 at 20:30 Kyiv every oblast was under alert.
+  - **After.** `score` returns an empty table with the log's columns and types plus the score columns. The CLI says there is nothing to score, in words that hold both when no window has closed and when no region was clear.
+- **Wrong #16: the revision check compared different rows.**
+  - **Before.** When a later revision puts a region under alert at T, its recomputed forecast is NaN, because the model forecasts clear regions only. `.mean()` skipped that row while `n` counted it, and the logged Brier still covered every row. In the example (Lviv's all-clear withdrawn, T = 12:00), n = 24 but the recomputed Brier covered 23 rows; on those 23 rows the logged Brier is 0.0433, not 0.0415.
+  - **After.** The per-horizon table moved from `main.py` to `live.summary`, where it is tested.
+    - The main score still covers every logged clear row: it scores what was published. Dropping rows because of later revisions would condition it on the future.
+    - The revision check shows its coverage, `still_clear` (the rows still clear at T in the current records), and compares `model_logged` with `model_recomputed` on exactly those rows. This replaces `model_on_revised_features`.
+- **Wrong #17: a red record of zero or negative length turned the level red.**
+  - **Before.** The level had its own rule for "a record covering the minute before T". It did not drop the empty intervals that `episodes()` drops, so yellow since 11:00 plus a red record 11:59:30–11:59:30 showed 🔴.
+  - **After.** Red is read from the red records through the same `AlertGrid` as `under`. An empty record covers nothing, and red implies under by construction. The step-4 mutation "levels from all records" no longer applies: `AlertGrid` itself keeps only what is known at T.
+  - **Measured.**
+    - The saved data hold 2 oblast or raion records with end ≤ start, none of them red.
+    - The new rule gives the same level as the old one at all 4,165 ten-minute moments × 24 regions from the splice to the map cutoff: 19,383 red region-moments, 0 differences, no holdout moment.
+    - A fresh forecast at the logged T, 2026-10-11 12:46, reproduces the log: 5 red, 8 yellow, the same numbers. The log stays as committed.
+- **Tests.** 100 pass: 97 before, plus three. The test helpers now build a tz-aware `end` even when every alert is still on, and the test log carries `made_at`, as `predict` writes it. Mutations, all caught:
+  - the logged Brier taken over all n rows (0.0415 ≠ 0.0433);
+  - `still_clear` counting all n rows;
+  - an untyped empty score (its `ts` loses the datetime type).
+- **Unchanged.** `predict` reports the moment as already logged. `score` has nothing to score, because the saved data end at T, so the holdout stays unscored.

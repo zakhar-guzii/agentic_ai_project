@@ -1,0 +1,246 @@
+{
+ "source": "https://api.alerts.in.ua/v1/regions/<uid>/alerts/month_ago.json",
+ "note": "raw responses, gzip; token sent in a header, not stored",
+ "files": [
+  {
+   "file": "r3_month_ago.json.gz",
+   "uid": 3,
+   "url": "https://api.alerts.in.ua/v1/regions/3/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:46:04Z",
+   "records": 211,
+   "sha256": "bd62ca3a6590963e3f34cdfd4b56ce70dac19870efdbc9c0b3937919ef7e1813",
+   "last_updated_at": "2026/10/12 12:43:22 +0000"
+  },
+  {
+   "file": "r4_month_ago.json.gz",
+   "uid": 4,
+   "url": "https://api.alerts.in.ua/v1/regions/4/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:46:35Z",
+   "records": 528,
+   "sha256": "52264dee2f123317bf74c3948943b4972ec29b7a09b1fdef09997c5fffa73c56",
+   "last_updated_at": "2026/10/12 12:43:22 +0000"
+  },
+  {
+   "file": "r5_month_ago.json.gz",
+   "uid": 5,
+   "url": "https://api.alerts.in.ua/v1/regions/5/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:47:07Z",
+   "records": 331,
+   "sha256": "bd2434b89567151f8ff4d8e28e0a984905ee8ae96d575058edbee0e6a21b9d3d",
+   "last_updated_at": "2026/10/12 12:43:22 +0000"
+  },
+  {
+   "file": "r8_month_ago.json.gz",
+   "uid": 8,
+   "url": "https://api.alerts.in.ua/v1/regions/8/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:47:38Z",
+   "records": 150,
+   "sha256": "5bcd4482fc6722c2b284c863de7c4766236d4bee18a3c637104b32b1c562146b",
+   "last_updated_at": "2026/10/12 12:43:22 +0000"
+  },
+  {
+   "file": "r9_month_ago.json.gz",
+   "uid": 9,
+   "url": "https://api.alerts.in.ua/v1/regions/9/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:48:09Z",
+   "records": 2292,
+   "sha256": "959bba6a9db5a4c411be2f6c29ebbbac5a3cba871a7eff615bf0249e0a00d273",
+   "last_updated_at": "2026/10/12 12:43:22 +0000"
+  },
+  {
+   "file": "r10_month_ago.json.gz",
+   "uid": 10,
+   "url": "https://api.alerts.in.ua/v1/regions/10/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:48:40Z",
+   "records": 523,
+   "sha256": "c16cef0e97f8cb6019b6dfb47dc9860160da09fe5139c91ad77616dddb0d025c",
+   "last_updated_at": "2026/10/12 12:48:30 +0000"
+  },
+  {
+   "file": "r11_month_ago.json.gz",
+   "uid": 11,
+   "url": "https://api.alerts.in.ua/v1/regions/11/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:49:11Z",
+   "records": 18,
+   "sha256": "bc6c194afa945eeefe2a2b4b266eafd32a358447d3d934c0ea834bfd4586fff7",
+   "last_updated_at": "2026/10/12 12:48:53 +0000"
+  },
+  {
+   "file": "r12_month_ago.json.gz",
+   "uid": 12,
+   "url": "https://api.alerts.in.ua/v1/regions/12/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:49:43Z",
+   "records": 1180,
+   "sha256": "71c209fdebd95165cecce42d3658126cccfcae8ec85ef259d1569602be283bd5",
+   "last_updated_at": "2026/10/12 12:49:18 +0000"
+  },
+  {
+   "file": "r13_month_ago.json.gz",
+   "uid": 13,
+   "url": "https://api.alerts.in.ua/v1/regions/13/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:50:14Z",
+   "records": 47,
+   "sha256": "ed1eb5c9bf980dc2e7819f0eccf0ccb38454f1ee45d36b26191599128f714054",
+   "last_updated_at": "2026/10/12 12:49:18 +0000"
+  },
+  {
+   "file": "r14_month_ago.json.gz",
+   "uid": 14,
+   "url": "https://api.alerts.in.ua/v1/regions/14/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:50:45Z",
+   "records": 1478,
+   "sha256": "2c25262ce0b38d76bfd2b8d70d20352287e13cad183116de45c336fecf982376",
+   "last_updated_at": "2026/10/12 12:49:18 +0000"
+  },
+  {
+   "file": "r15_month_ago.json.gz",
+   "uid": 15,
+   "url": "https://api.alerts.in.ua/v1/regions/15/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:51:16Z",
+   "records": 1105,
+   "sha256": "86bd4f423f635f662ff378b0bdbd5f481f0d75036abf1e8eb76ca909464db5b3",
+   "last_updated_at": "2026/10/12 12:50:55 +0000"
+  },
+  {
+   "file": "r17_month_ago.json.gz",
+   "uid": 17,
+   "url": "https://api.alerts.in.ua/v1/regions/17/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:51:48Z",
+   "records": 947,
+   "sha256": "33dbb194c2eee3ee1d894ab3236e401dfe815427ad7f227ae2d669b744012cea",
+   "last_updated_at": "2026/10/12 12:51:42 +0000"
+  },
+  {
+   "file": "r18_month_ago.json.gz",
+   "uid": 18,
+   "url": "https://api.alerts.in.ua/v1/regions/18/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:52:19Z",
+   "records": 873,
+   "sha256": "676b9d7ad6fa2b35ad3c2cd9025f7822c21d28a515b7af454ef4072a522d3934",
+   "last_updated_at": "2026/10/12 12:51:42 +0000"
+  },
+  {
+   "file": "r19_month_ago.json.gz",
+   "uid": 19,
+   "url": "https://api.alerts.in.ua/v1/regions/19/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:52:50Z",
+   "records": 779,
+   "sha256": "d0344be4aaf5e8041e547cb70520bb4c5e7ce4bf261f17e8e86c8debe1c272bb",
+   "last_updated_at": "2026/10/12 12:52:47 +0000"
+  },
+  {
+   "file": "r20_month_ago.json.gz",
+   "uid": 20,
+   "url": "https://api.alerts.in.ua/v1/regions/20/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:53:21Z",
+   "records": 1055,
+   "sha256": "48e015738d617be7c21d4c5cad06ee2c0c7fb7ffbd0753316ab1f97899b31b93",
+   "last_updated_at": "2026/10/12 12:52:47 +0000"
+  },
+  {
+   "file": "r21_month_ago.json.gz",
+   "uid": 21,
+   "url": "https://api.alerts.in.ua/v1/regions/21/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:53:53Z",
+   "records": 150,
+   "sha256": "9ef599372feea52e08a26619600d609df1b2426f825e86e4962919706144dbdd",
+   "last_updated_at": "2026/10/12 12:53:45 +0000"
+  },
+  {
+   "file": "r22_month_ago.json.gz",
+   "uid": 22,
+   "url": "https://api.alerts.in.ua/v1/regions/22/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:54:24Z",
+   "records": 2390,
+   "sha256": "7a2509c1d9743be0089badcb552cd6bda02e8c4d63ebaa5765dbb91d29c09598",
+   "last_updated_at": "2026/10/12 12:53:45 +0000"
+  },
+  {
+   "file": "r23_month_ago.json.gz",
+   "uid": 23,
+   "url": "https://api.alerts.in.ua/v1/regions/23/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:54:55Z",
+   "records": 375,
+   "sha256": "abfd56a933669d44ae66bc3fe7391ebb9ef901b8d15903aa4b25b56cad61aecd",
+   "last_updated_at": "2026/10/12 12:54:31 +0000"
+  },
+  {
+   "file": "r24_month_ago.json.gz",
+   "uid": 24,
+   "url": "https://api.alerts.in.ua/v1/regions/24/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:55:26Z",
+   "records": 630,
+   "sha256": "0d6eface2956f00b4b75a8c5213ce348de93a72ee3495307dc2b314f23934984",
+   "last_updated_at": "2026/10/12 12:54:57 +0000"
+  },
+  {
+   "file": "r25_month_ago.json.gz",
+   "uid": 25,
+   "url": "https://api.alerts.in.ua/v1/regions/25/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:55:58Z",
+   "records": 746,
+   "sha256": "fb5ce7906abb4a80b2ca2c32d8234364748a3b81e1ec643d72ae21def4e9bf5d",
+   "last_updated_at": "2026/10/12 12:55:32 +0000"
+  },
+  {
+   "file": "r26_month_ago.json.gz",
+   "uid": 26,
+   "url": "https://api.alerts.in.ua/v1/regions/26/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:56:29Z",
+   "records": 52,
+   "sha256": "3655e4fec2c5380744704b9b2de010484c69babe098ac60c6a1ac57a35ec737f",
+   "last_updated_at": "2026/10/12 12:55:32 +0000"
+  },
+  {
+   "file": "r27_month_ago.json.gz",
+   "uid": 27,
+   "url": "https://api.alerts.in.ua/v1/regions/27/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:57:00Z",
+   "records": 49,
+   "sha256": "f9987fc9d49c7b9428115cfe29f575aac542eed384792e906b5895316a88b7a0",
+   "last_updated_at": "2026/10/12 12:55:32 +0000"
+  },
+  {
+   "file": "r28_month_ago.json.gz",
+   "uid": 28,
+   "url": "https://api.alerts.in.ua/v1/regions/28/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:57:31Z",
+   "records": 569,
+   "sha256": "d0481da6884e0679b06834e9e79582d2bc1b277cdaed9915774fea95223d8221",
+   "last_updated_at": "2026/10/12 12:55:32 +0000"
+  },
+  {
+   "file": "r31_month_ago.json.gz",
+   "uid": 31,
+   "url": "https://api.alerts.in.ua/v1/regions/31/alerts/month_ago.json",
+   "status": 200,
+   "fetched_utc": "2026-10-12T12:58:02Z",
+   "records": 218,
+   "sha256": "f8445aca7f016714215f6cf5e69d9457b8b20eb52c2a8e118e5d5e7ff3871172",
+   "last_updated_at": "2026/10/12 12:55:32 +0000"
+  }
+ ]
+}

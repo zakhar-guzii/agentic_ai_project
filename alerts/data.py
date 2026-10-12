@@ -89,6 +89,18 @@ def load_api(api_dir=API_DIR, regions_path=REGIONS):
     return out
 
 
+def api_asof(uids, api_dir=API_DIR):
+    """The moment up to which the saved history of every uid is complete: each uid's newest server snapshot
+    (`last_updated_at`, up to a minute or two before the fetch), then the earliest of these, floored to the minute.
+    A uid that was never fetched raises KeyError."""
+    newest = {}
+    for man in glob.glob(f"{api_dir}/*/MANIFEST.json"):
+        for f in json.load(open(man))["files"]:
+            t = pd.to_datetime(f["last_updated_at"], format="%Y/%m/%d %H:%M:%S %z").tz_convert("UTC")
+            newest[f["uid"]] = max(newest.get(f["uid"], t), t)
+    return min(newest[u] for u in uids).floor("min")
+
+
 def history(map_recs, api_recs):
     """One record per alert: the map before SPLICE, alerts.in.ua from SPLICE on."""
     h = pd.concat([map_recs[map_recs.start < SPLICE], api_recs[api_recs.start >= SPLICE]], ignore_index=True)

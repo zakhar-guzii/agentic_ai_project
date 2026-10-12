@@ -745,3 +745,30 @@ A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec f
   - `fetch`, then the one registered run on the full window. Its report says that its first 17.7 h were seen early.
   - No decision depends on the early look: the model, the rows, the references, the bar and the report format were all fixed by Decision 10 before it.
 - **Lesson.** A refusal check must be run where the refusal is certain, or with the artifacts' directory read-only. A guard is tested against the case it exists for.
+
+### Step 7 result (2026-10-12 ~16:20 Kyiv)
+
+- **Data.** One pull, `20261012T1246Z`, 24 regions, no file contains the token. The saved data now end at 2026-10-12 12:43 UTC (15:43 Kyiv).
+- **Forecast moment T2 = 2026-10-12 12:43 UTC**, made 15 min after T: a live forecast. 17 of 24 regions under alert (5 red, 12 yellow). None of its windows closes inside the data, so it is not scored.
+- **The registered holdout** (Decision 10): T from the map cutoff (10-10 19:03 UTC) to 10-12 12:43 UTC, 41.7 h, three Kyiv days (the first 2 h long). Commit `7ff31a2` registered it.
+
+  | H | n | base rate | Brier model / clim28 / recent7 | skill vs clim28 [95% CI] | skill vs recent7 [95% CI] | both > 0 |
+  |---|---:|---:|---|---|---|---|
+  | 1 h | 1,089 | 0.338 | 0.1794 / 0.1931 / 0.1811 | +0.071 [+0.061, +0.245] | +0.009 [+0.002, +0.093] | yes |
+  | 3 h | 1,036 | 0.600 | 0.1585 / 0.1982 / 0.1529 | +0.200 [+0.110, +0.600] | −0.036 [−0.181, +0.304] | no |
+  | 6 h | 964 | 0.753 | 0.1178 / 0.1740 / 0.1017 | +0.323 [+0.286, +0.506] | −0.158 [−0.637, +0.069] | no |
+
+  - **Registered bar: FAIL** (1 h only). The model beats daily clim28 at every horizon. Against recent7 it is level at 1 h and worse at 3 and 6 h.
+  - **Per Kyiv day, 6 h vs recent7:** +0.07 (10-10, 40 rows), −0.07 (10-11), −0.64 (10-12). At 3 h: +0.30, +0.00, −0.18. The loss grows on 10-12.
+  - **Reading (a description, not a test).** The holdout is a period of very high load: the 6 h base rate is 0.75, against about 0.5 in the benchmark. recent7 follows the last week's level, and in such a period that is hard to beat. With three days, the intervals are wide. This does not establish that the model is worse than recent7 in general, and it does not confirm the benchmark's gains at 3 h.
+  - **Per region:** every region has n < 100 here ("quality not verified"). Skills against a reference with Brier near 0 explode (e.g. −6e17 for Donetsk, n = 1), so the per-region table is shown, not read.
+  - **The early look (Wrong #21)** on the first 17.7 h read PASS; the full registered window reads FAIL. The difference is the later hours, above all 10-12. Nothing was changed between the two.
+- **Live log.** One moment is scored: 10-11 12:46 UTC, a replay (made 20.3 h after T). 11 clear regions:
+  - Brier model / clim28 / recent7: 0.244 / 0.238 / 0.201 at 1 h; 0.184 / 0.295 / 0.184 at 3 h; 0.206 / 0.340 / 0.191 at 6 h.
+  - Revised rows 0. n = 11 is an anecdote, not evidence.
+- **Late revisions.** 16,291 records with the same id in both pulls: 0 with a changed start, 0 with a changed end that was already set, 0 with a changed level. The open limitation of step 3 does not show up between these two pulls, a day apart. The history report stayed byte-identical.
+- **Report render.** `holdout_report.md` first put the pooled table inside the 1 h section; the insertion index was hard-coded. The order was fixed and the run repeated. It is deterministic: the summary JSON and the forecast file are byte-identical to the first render. The model, rows and scores did not change.
+- **Checks.** 116 tests pass after the fetch: 114 before and two test-first. Mutations, both caught on the assertion: a window that must close strictly before `hi`; no 29-day lead (clim28 differs from the benchmark CSV on all 4,460 rows).
+  - The holdout Brier recomputed from the CSV with NumPy equals the report to 1e-12.
+  - A second `holdout` refuses. Two `page` runs give the same bytes.
+- **Frozen.** The holdout artifacts and the forecast log are final for the submission. No `predict` after this.

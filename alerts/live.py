@@ -10,12 +10,12 @@ from alerts.features import HOURS, AlertGrid, Features, ForecastTable
 
 def forecast(records, T, model):
     """One row per region at T, from the records known at T only: the features, `under` (an alert in the minute before
-    T) and its `level`, red if any oblast or raion record covering that minute is red. A clear region also gets the
-    model's p1/p3/p6 and the registered references: clim28, counted at 00:00 Kyiv as in the benchmark, and recent7."""
+    T) and its `level`, red if any oblast or raion record covering that minute is red. Red is read by the same rule
+    as `under`, so a record of zero or negative length covers nothing. A clear region also gets the model's p1/p3/p6
+    and the registered references: clim28, counted at 00:00 Kyiv as in the benchmark, and recent7."""
     known = records[records.start < T]
     rows = Features(AlertGrid(known, T - pd.Timedelta("8D"), T)).at([T])
-    on = known[known.level.isin(["oblast", "raion"]) & ~(known.end <= T - pd.Timedelta("1min"))]
-    red = rows.obl.isin(on.oblast_id[on.alert_level == "red"])
+    red = AlertGrid(known[known.alert_level == "red"], T - pd.Timedelta("1min"), T).under(1)  # same rule as `under`
     rows["level"] = pd.Series(np.where(red, "red", "yellow"), rows.index).where(rows.under == 1)
     midnight = T.tz_convert("Europe/Kyiv").normalize().tz_convert("UTC")
     past = ForecastTable(known, midnight - pd.Timedelta("28D"), T).rows

@@ -55,6 +55,13 @@ def test_regions_under_alert_now_get_their_level():
     assert now.level.dropna().to_dict() == {RIVNE: "yellow", VOLYN: "red"}
 
 
+def test_an_empty_or_negative_red_record_leaves_the_level_yellow():
+    world = records([(VOLYN, "yellow", "2026-10-01 11:00", None),
+                     (VOLYN, "red", "2026-10-01 11:59:30", "2026-10-01 11:59:30"),  # zero length
+                     (VOLYN, "red", "2026-10-01 11:59:40", "2026-10-01 11:59:20")])  # ends before it starts
+    assert live.forecast(world, NOW, MODEL).set_index("obl").level.dropna().to_dict() == {VOLYN: "yellow"}
+
+
 def test_clear_regions_get_the_forecast_and_both_references():
     now = live.forecast(WORLD, NOW, MODEL).set_index("obl")
     p, clear = ["p1", "p3", "p6"], now.under == 0

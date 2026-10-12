@@ -69,3 +69,12 @@ def test_the_live_score_shows_replays_apart_with_the_revision_check():
     for col in ("still clear", "Brier, logged", "Brier, recomputed", "revised rows"):
         assert col in heads
     assert "0.1800" in [td.text for td in table.iter("td")]  # the recomputed Brier of the live 3 h row
+
+
+def test_the_model_switch_has_one_button_per_panel_and_shows_the_first_panel_first():
+    out = page.switch({"v1 logistic": "<p>one</p>", "v2 <LightGBM>": "<p>two</p>"})
+    assert out.count('type="radio"') == 2 and out.count(" checked") == 1 and 'id="m0" checked' in out
+    assert '<label for="m1">v2 &lt;LightGBM&gt;</label>' in out  # labels are escaped
+    assert '<div class="panel p0"><p>one</p></div>' in out and '<div class="panel p1"><p>two</p></div>' in out
+    # CSS only: every panel is hidden unless the radio before it is checked
+    assert ".panel{display:none}" in page.CSS and all(f"#m{i}:checked~.p{i}" in page.CSS for i in range(2))

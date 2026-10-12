@@ -177,7 +177,7 @@ def evaluate(args):
     for baseline in (Climatology(28), Climatology(None), RecentLevel(), Persistence()):
         rows = rows.join(baseline.predict(rows))
     run = ForwardRun(candidates)
-    raws, saved, skills, mean_skills = {}, [], {}, {c.name: [] for c in candidates}
+    raws, saved, skills, classification, mean_skills = {}, [], {}, {}, {c.name: [] for c in candidates}
     out = [f"# {stage.title()} report", "",
            "These scores chose the model; not independent." if stage == "choose" else
            "Historical benchmark, seen by the feasibility probe. This is not the untouched holdout.",
@@ -222,16 +222,24 @@ def evaluate(args):
         if stage == 'choose':
             cols = [c.name for c in candidates] + [f'{ref}_{h}' for ref in ('clim28', 'recent7', 'climall', 'persist')]
             out += ['\n### Correlation of errors (y - p)\n', md(score.error_correlation(cols))]
+        on_choose = Scores(raw[raw.scored & (raw.ts >= CHOOSE[0]) & (raw.ts < CHOOSE[1])], h)
         for c in candidates:
             region = score.per_oblast(c.name)
             region.insert(0, 'region', region.index.map(names))
+            t = on_choose.threshold(c.name)
+            cls = score.classes(c.name, t)
+            classification.setdefault(c.name, {})[h] = dict(threshold=t, **cls.loc['all'].to_dict())
+            cls.insert(0, 'region', cls.index.map(lambda o: names.get(o, 'all')))
             out += [f'\n### Per region: {c.name}\n', md(region, '{:.4f}'),
-                    f'\n### Reliability: {c.name} (bins [0,.1), ... [.9,1])\n', md(score.reliability(c.name), '{:.4f}')]
+                    f'\n### Reliability: {c.name} (bins [0,.1), ... [.9,1])\n', md(score.reliability(c.name), '{:.4f}'),
+                    f'\n### Classification: {c.name} (alarm p >= {t:.2f}, the max-F1 threshold on CHOOSE'
+                    + ('; in-sample here' if stage == 'choose' else '') + ')\n', md(cls, '{:.4f}')]
         cols = ['obl', 'ts', f'y{h}', 'block', 'scored'] + [f'{ref}_{h}' for ref in ('clim28', 'climall', 'recent7', 'persist')]
         cols += [x for c in candidates for x in (f'raw_{c.name}', c.name)]
         saved.append(raw[cols].rename(columns={f'y{h}': 'y', **{f'{ref}_{h}': ref for ref in
                                                             ('clim28', 'climall', 'recent7', 'persist')}}).assign(hours=h))
     summary = dict(stage=stage, git_commit=commit, end=str(end), candidates=[c.name for c in candidates],
+                   classification=classification,
                    data_manifest_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                                          for p in (frozen_api / 'MANIFEST.json', D.MAP_DIR / 'MANIFEST.json')})
     if stage == 'choose':
@@ -413,6 +421,61 @@ def holdout(args):
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")
     print(md(pd.DataFrame(pooled).set_index("horizon"), "{:.4f}"))
     print(f"bar: {passed} -> {'PASS' if verdict else 'FAIL'}; wrote {report.relative_to(ROOT)}")
+
+
+def metrics(args):
+    """Offline, post hoc (Decision 11): precision, recall, F1, AP and ROC-AUC of the frozen forecasts. Each forecast's
+    alarm threshold maximises F1 on the CHOOSE rows and is applied unchanged to the benchmark and the holdout."""
+    import json
+    import pandas as pd
+    from alerts.evaluate import Scores
+    from alerts.features import HOURS
+    from alerts.splits import BENCHMARK, CHOOSE
+    dest, names = ROOT / "results", _names()
+    read = lambda stage: pd.read_csv(dest / f"{stage}_forecasts.csv.gz", parse_dates=["ts"])
+    ch, be = read("choose"), read("benchmark")
+    periods = {"choose": ch[ch.scored & (ch.ts >= CHOOSE[0])], "benchmark": be[be.scored & (be.ts >= BENCHMARK[0])],
+               "holdout": read("holdout").rename(columns={"model": "logistic"})}
+    out = ["# Classification metrics", "",
+           "Post hoc (PROCESS_LOG, Decision 11): computed from the frozen forecast files, no refit; no decision was taken on "
+           "them. Generated offline by `python main.py metrics`.",
+           "An alarm is p >= t. For each horizon and forecast, t maximises F1 on the CHOOSE scored rows (grid .01-.99) and "
+           "is applied unchanged to the benchmark and the holdout; on CHOOSE the numbers are in-sample.",
+           "AP (average precision) and ROC-AUC need no threshold. f1_always is the F1 of always saying yes, 2b / (1 + b); "
+           "f1_lift = f1 - f1_always. Per region, AUC ranks moments within that region only.",
+           "The holdout is about three Kyiv days of very high load: read it as descriptive."]
+    pooled, regions, head = [], {}, len(out)
+    for h in HOURS:
+        scores = {k: Scores(v[v.hours == h].rename(columns={"y": f"y{h}"}), h) for k, v in periods.items()}
+        for col in ("logistic", "clim28", "recent7"):
+            t = scores["choose"].threshold(col)
+            for k, sc in scores.items():
+                pooled.append(dict(horizon=h, period=k, forecast=col, threshold=t, brier=sc.brier(col),
+                                   **sc.classes(col, t).loc["all"]))
+                if col != "logistic" or k == "choose":
+                    continue
+                r = sc.classes(col, t).assign(f1_lift=lambda d: d.f1 - d.f1_always)
+                r.insert(0, "region", r.index.map(lambda o: names.get(o, "all")))
+                regions[f"{k}, {h} h"] = r
+                out += [f"\n## Per region: {k}, {h} h (logistic, t = {t:.2f})\n",
+                        md(r.sort_values("f1_lift").drop(columns="pos"), "{:.3f}")]
+                if k == "benchmark":
+                    rows = sc.rows.assign(obl=sc.rows.ts.dt.tz_convert("Europe/Kyiv").dt.hour // 3 * 3)
+                    slot = Scores(rows, h).classes(col, t).drop(index="all")
+                    slot["skill_recent7"] = [1 - Scores(g, h).brier(col) / Scores(g, h).brier("recent7")
+                                             for _, g in rows.groupby("obl")]
+                    out += [f"\n### Per Kyiv 3-hour slot: benchmark, {h} h\n",
+                            md(slot.rename_axis("slot from").drop(columns="pos"), "{:.3f}")]
+    table = pd.DataFrame(pooled).astype({"n": int, "pos": int})
+    shown = table.set_index(table.horizon.astype(str) + " h, " + table.period + ", " + table.forecast).drop(
+        columns=["horizon", "period", "forecast"]).rename_axis("forecast")
+    out[head:head] = ["\n## Pooled\n", md(shown, "{:.3f}")]
+    (dest / "metrics_report.md").write_text("\n".join(out) + "\n")
+    as_json = lambda df: json.loads(df.to_json(orient="records"))
+    (dest / "metrics.json").write_text(json.dumps(dict(pooled=as_json(table), regions={
+        k: as_json(r.reset_index()) for k, r in regions.items()}), indent=2, ensure_ascii=False) + "\n")
+    print(md(shown[table.period.to_numpy() != "choose"][["threshold", "precision", "recall", "f1", "ap", "auc"]], "{:.3f}"))
+    print("wrote results/metrics_report.md and results/metrics.json")
 
 
 def _history():
@@ -666,6 +729,8 @@ def main():
                    ).set_defaults(func=predict)
     sub.add_parser("score", help="offline: score logged forecasts whose windows closed inside the saved data"
                    ).set_defaults(func=score)
+    sub.add_parser("metrics", help="offline: precision, recall, F1, AP and ROC-AUC of the frozen forecasts, per region "
+                   "and pooled, write results/metrics_report.md").set_defaults(func=metrics)
     sub.add_parser("holdout", help="offline, once: the frozen model on the untouched holdout, the live-log score and "
                    "the late-revision check").set_defaults(func=holdout)
     sub.add_parser("history", help="offline: alert load over time and the levels since the reform, write "

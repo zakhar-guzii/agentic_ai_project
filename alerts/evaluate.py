@@ -1,6 +1,7 @@
 """Forecast losses and uncertainty: a bootstrap resamples whole Kyiv calendar days, never individual rows."""
 import numpy as np
 import pandas as pd
+from sklearn.metrics import average_precision_score, precision_recall_fscore_support, roc_auc_score
 
 
 class Scores:
@@ -45,6 +46,29 @@ class Scores:
                             skill_recent7=1 - b / refs[1] if refs[1] else np.nan,
                             quality='quality not verified' if len(part) < 100 else 'n >= 100; pooled CI only'))
         return pd.DataFrame(out).set_index('obl')
+
+    def classes(self, col, t):
+        """Per region and `all`: precision, recall and F1 of the alarm `p >= t`, F1 of always saying yes, and the
+        threshold-free AP and ROC-AUC (NaN for a region with one class)."""
+        self.loss(col)
+
+        def one(y, p):
+            y, two = y.astype(int), y.nunique() == 2
+            P, R, F, _ = precision_recall_fscore_support(y, p >= t, average='binary', zero_division=0)
+            b = float(y.mean())
+            return dict(n=len(y), pos=int(y.sum()), base_rate=b, mean_p=float(p.mean()), precision=P, recall=R, f1=F,
+                        f1_always=2 * b / (1 + b), ap=average_precision_score(y, p) if two else np.nan,
+                        auc=roc_auc_score(y, p) if two else np.nan)
+        out = {obl: one(part[f'y{self.hours}'], part[col]) for obl, part in self.rows.groupby('obl')}
+        out['all'] = one(self.y, self.rows[col])
+        return pd.DataFrame.from_dict(out, orient='index').rename_axis('obl')
+
+    def threshold(self, col):
+        """The alarm threshold with the highest F1 on the grid .01, ..., .99; the lowest wins a tie."""
+        grid = np.arange(1, 100) / 100
+        f1 = [precision_recall_fscore_support(self.y.astype(int), self.rows[col] >= t, average='binary',
+                                              zero_division=0)[2] for t in grid]
+        return float(grid[int(np.argmax(f1))])
 
     def reliability(self, col):
         self.loss(col)  # validate probabilities before assigning bins

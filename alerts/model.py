@@ -15,6 +15,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 
 from alerts.checks import AdversarialValidation
+from alerts.evaluate import Scores
 from alerts.features import Features
 from alerts.splits import DECISION
 
@@ -145,6 +146,11 @@ class ForwardRun:
             for c in self.candidates:
                 platt = Platt().fit(win[f"raw_{c.name}"], win[f"y{hours}"])
                 raw.loc[part.index, c.name] = platt.predict(part[f"raw_{c.name}"])
+                if progress:
+                    m = Scores(raw.loc[part.index], hours).classes(c.name, .5).loc["all"]
+                    print(f"H={hours} block={s} {c.name}: n={int(m.n)} base={m.base_rate:.3f} mean_p={m.mean_p:.3f} "
+                          f"brier={Scores(raw.loc[part.index], hours).brier(c.name):.4f} ap={m.ap:.3f} auc={m.auc:.3f}",
+                          flush=True)
         return raw
 
     def final(self, rows, raws, asof):

@@ -85,3 +85,37 @@ def test_the_forecast_uses_nothing_from_t_on():
         pd.DatetimeIndex([T("2026-10-03 23:59")]))  # after the alerts still on at the end have started
     at = lambda records, moment: live.forecast(records, moment, MODEL)
     assert TruncationCheck(random_world()).mismatches(at, moments) == []
+
+
+# --- the log and its score ---
+def test_a_moment_is_logged_once(tmp_path):
+    path, rows = tmp_path / "forecast_log.csv", live.forecast(WORLD, NOW, MODEL)
+    assert live.log(rows, path) and not live.log(rows, path)
+    back = pd.read_csv(path, parse_dates=["ts"])
+    assert len(back) == 24 and (back.ts == NOW).all()
+
+
+def logged(world, path):
+    """The log of a forecast at NOW, as `score` reads it back."""
+    live.log(live.forecast(world, NOW, MODEL), path)
+    return pd.read_csv(path, parse_dates=["ts"])
+
+
+def test_a_logged_forecast_is_scored_once_its_window_closes(tmp_path):
+    world = records([(RIVNE, "yellow", "2026-10-01 11:30", None),  # under alert at T: no forecast to score
+                     (VOLYN, "red", "2026-10-01 14:00", "2026-10-01 14:20")])  # a start at T + 2 h
+    scored = live.score(logged(world, tmp_path / "log.csv"), world, NOW + pd.Timedelta("4h"), MODEL).set_index("obl")
+    assert len(scored) == 23 and RIVNE not in scored.index
+    # the 6 h window is still open at T + 4 h
+    assert scored.loc[VOLYN, ["y1", "y3", "y6"]].tolist() == pytest.approx([0, 1, np.nan], nan_ok=True)
+    assert scored.loc[LVIV, ["y1", "y3", "y6"]].tolist() == pytest.approx([0, 0, np.nan], nan_ok=True)
+
+
+def test_features_revised_after_the_log_are_flagged(tmp_path):
+    from alerts.features import NEIGHBOURS
+    first = records([(LVIV, "yellow", "2026-10-01 08:00", "2026-10-01 09:00")])
+    final = records([(LVIV, "yellow", "2026-10-01 08:00", "2026-10-01 09:30")])  # the all-clear was revised later
+    scored = live.score(logged(first, tmp_path / "log.csv"), final, NOW + pd.Timedelta("1h"), MODEL)
+    # Lviv's own minutes under alert, and its 5 neighbours' nb_alert_min_24h
+    assert sorted(scored.obl[scored.revised]) == sorted([LVIV] + NEIGHBOURS[LVIV])
+    assert scored.filter(like="final_p").notna().all().all()  # the forecasts on the revised features, for their Brier

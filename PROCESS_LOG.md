@@ -540,3 +540,37 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
 - **Freeze protection verified:** repeat CLI calls refuse existing CHOOSE and benchmark artifacts before training. Both output hashes still match. Metric/CLI tests pass after pre-registration; 89 tests passed before scoring, and the strengthened final-calibration test passed separately after its mutation correction. `check` remains byte-identical.
 - Preserved the previous session's generated `catboost_info/` directory and added it to `.gitignore`; new CatBoost fits suppress auxiliary files.
 - **Open limitation:** final API record revisions are not publication-time snapshots. The historical event-time checks do not remove this risk; live snapshot comparison and the untouched holdout are reserved for later steps. Steps 4–8 are not implemented in this continuation.
+
+## 2026-10-12: step 4 (live forecast)
+
+### Decision 6: the live forecast runs on the saved data
+
+- **The user.** Plan on the data we already have.
+  - `predict` does not re-download history: a full `month_ago` pull takes about 13 min at 2 requests per minute.
+  - The saved data are refreshed only by `fetch` (daily).
+  - The forecast is made as of the time the saved data reach.
+- **Check: where do the saved data end?**
+  - The only pull, `20261011T1247Z`, fetched its regions 12:47:56–13:13:07 UTC.
+  - The server's `meta.last_updated_at` reads 12:46:28–13:12:39. It is always earlier than the fetch, and regions fetched minutes apart share it, so it is the server's snapshot time.
+  - **Data trap:** `fetched_utc` can be about 1.5 min later than the snapshot. A start inside that gap would look "clear".
+- **Decisions.**
+  1. **T is where the saved data end, not the wall clock.**
+     - For each of the 24 regions take its newest `last_updated_at`. T is the earliest of these, floored to the minute; for this pull, 2026-10-11 12:46 UTC.
+     - `predict` makes no network call and trains nothing: it loads `models/logistic.joblib` (Decision 5). It prints how old the data are.
+     - Each `fetch` gives one new forecast moment.
+     - A pull takes about 25 min, so the regions fetched later hold records after T. They are cut as `TruncationCheck.known_at` cuts records: starts at or after T are dropped, and ends after T are unknown.
+  2. **24 rows per T.**
+     - A region under alert in the minute before T gets a level: red if any oblast or raion record covering that minute is red, otherwise yellow. It gets no probability: the model forecasts a new start for a clear region only.
+     - A clear region gets `p1/p3/p6` and the two registered references: `clim28`, counted at 00:00 Kyiv of T's day as in the benchmark, and `recent7`.
+  3. **Threats are not logged.** History has no `threats` field, and T is not "now". The levels from Decision 3 stay.
+  4. **The log** is `results/forecast_log.csv`, append-only and committed.
+     - Columns: T, `made_at`, the region, `under`, the level, the three forecasts and references, the 19 features and the model's SHA-256.
+     - A T already in the log is not appended again; the forecast is deterministic.
+     - A row with `made_at` > T + H is a replay from the saved pull, not a live forecast. Step 7 reports the two separately.
+  5. **Scoring runs on demand and stores nothing.**
+     - A logged clear row is scored at H once T + H is inside the saved data. Its label is an episode start in [T, T + H) in the current history.
+     - Per horizon: n and the Brier score of the model, clim28 and recent7.
+     - Decision 4's revision check: the forecast at T is recomputed from the current history. The rows whose features changed and the model's Brier on them are reported.
+     - No bootstrap CI: by the deadline the log holds one moment per pull.
+  6. **Holdout rule.** Every T falls after MAP_CUTOFF, so its outcomes are the untouched holdout. In step 4 `score` runs only in synthetic tests; its first real run is step 7, after that step's pre-registration.
+- **Plan:** [research/step-4-plan.md](research/step-4-plan.md).

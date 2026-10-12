@@ -68,7 +68,7 @@ md = ["# AI conversation log", "",
       "Below each session: what the user typed (first 400 characters).", ""]
 for start, end, tool, rel, said in sorted(index):
     md.append(f"## {start[:16].replace('T', ' ')} → {end[11:16]} UTC · {tool} · [{rel}]({rel})")
-    md += [f"- `{t[11:16]}` {' '.join(x.split())[:400]}" for t, x in said] or ["- (subagent)"]
+    md += [f"- `{t[11:16]}` {' '.join(x.split())[:400].rstrip()}" for t, x in said] or ["- (subagent)"]
     md.append("")
 (OUT / "README.md").write_text("\n".join(md))
 print(f"{len(index)} sessions → {OUT}")

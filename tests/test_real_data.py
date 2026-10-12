@@ -90,3 +90,21 @@ def test_labels_and_baselines_reproduce_the_feasibility_probe(m, a):
         assert abs(rows.loc[w, f"y{h}"].mean() - base) <= 0.005
         assert abs(brier(pers[f"persist_{h}"], f"y{h}") - b_pers) <= 0.005
         assert abs(brier(clim[f"clim28_{h}"], f"y{h}") - b_clim) <= 0.003
+
+
+@need_api
+def test_daily_history_adds_up(m, a):
+    """Step 5: the per-day table neither loses nor invents alert time or starts, up to the map cutoff."""
+    from alerts.features import OBLASTS
+    h = D.history(m, a)
+    h = h[h.start < D.MAP_CUTOFF]
+    lo = pd.Timestamp("2025-10-04", tz="Europe/Kyiv").tz_convert("UTC")
+    d = D.daily(h, lo, D.MAP_CUTOFF, OBLASTS)
+    ep = D.episodes(h, D.MAP_CUTOFF)
+    assert (d.groupby("obl").starts.sum() == ep[ep.start >= lo].groupby("oblast_id").size().reindex(OBLASTS, fill_value=0)).all()
+    assert (d.groupby("obl").minutes.sum() == (D.MAP_CUTOFF - lo) // pd.Timedelta("1min")).all()
+    assert (d.alert <= d.minutes).all() and (d.red.isna() | (d.red <= d.alert)).all()
+    assert d.red.isna().eq(d.day < pd.Timestamp("2026-09-12")).all()  # levels exist from the splice only
+    # alert time from the splice on = the minutes `compare` counts on the same window (another code path, data report)
+    hc = h[h.level.isin(CORE)]
+    assert d[d.day >= pd.Timestamp("2026-09-12")].alert.sum() == D.compare(hc, hc, D.SPLICE, D.MAP_CUTOFF).loc["all", "minutes_a"]

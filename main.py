@@ -294,7 +294,7 @@ def score(args):
     table = live.summary(live.score(pd.read_csv(LOG, parse_dates=["ts", "made_at"]),
                                     D.history(D.load_map(), D.load_api()), asof, Forecaster.load(MODEL)))
     if table.empty:
-        print(f"nothing to score: no logged window closes before {asof}, where the saved data end")
+        print(f"nothing to score: no clear region's logged window closes by {asof}, where the saved data end")
         return
     print(md(table, "{:.4f}"))
     print("\nRevision check: on the `still_clear` rows (clear at T in the current records too), `model_logged` is the "

@@ -40,7 +40,7 @@ def score(log, records, asof, model):
     """The logged forecasts of clear regions with their outcomes y1/y3/y6: an episode start in [T, T + H) in the
     current records, NaN while T + H is after `asof`. Late API revisions (Decision 4): `revised` marks a row whose
     features at T, recomputed from the current records, differ from the logged ones; final_p1/p3/p6 are the forecasts
-    on the recomputed features."""
+    on the recomputed features. Empty, with the same columns, when no logged region was clear."""
     out, cols = [], ["under"] + Features.NAMES[1:]
     for T, rows in log[log.under == 0].groupby("ts"):
         grid = AlertGrid(records, T, asof)
@@ -49,7 +49,8 @@ def score(log, records, asof, model):
         revised = ~np.isclose(rows[cols].to_numpy(float), final[cols].to_numpy(float)).all(axis=1)
         out.append(rows.join(y, on="obl").assign(revised=revised, **{f"final_p{h}": final[f"p{h}"].to_numpy()
                                                                       for h in HOURS}))
-    return pd.concat(out, ignore_index=True)
+    new = [f"y{h}" for h in HOURS] + ["revised"] + [f"final_p{h}" for h in HOURS]
+    return pd.concat(out, ignore_index=True) if out else log.iloc[:0].reindex(columns=[*log.columns, *new])
 
 
 def summary(scored):

@@ -38,8 +38,9 @@ NOW = T("2026-10-01 12:00")
 
 def records(rows):
     """(oblast_id, alert_level, start, end) -> raion-level AIR records; end None = still on."""
-    return pd.DataFrame([dict(oblast_id=o, level="raion", alert_level=lvl, start=T(s), end=T(e) if e else pd.NaT)
-                         for o, lvl, s, e in rows])
+    r = pd.DataFrame([dict(oblast_id=o, level="raion", alert_level=lvl, start=T(s), end=T(e) if e else pd.NaT)
+                      for o, lvl, s, e in rows])
+    return r.assign(end=pd.to_datetime(r.end, utc=True))  # tz-aware even when every alert is still on
 
 
 WORLD = records([(VOLYN, "yellow", "2026-10-01 11:00", None), (VOLYN, "red", "2026-10-01 11:30", "2026-10-01 11:59:30"),
@@ -141,6 +142,17 @@ def test_a_region_revised_into_an_alert_is_compared_on_the_same_rows(tmp_path):
     rest = scored[scored.obl != LVIV]  # the revision check compares the two forecasts on the same 23 rows
     assert s.model_logged == pytest.approx(((rest.p1 - rest.y1) ** 2).mean())
     assert s.model_recomputed == pytest.approx(((rest.final_p1 - rest.y1) ** 2).mean())
+
+
+def test_a_log_with_every_region_under_alert_scores_nothing(tmp_path):
+    from alerts.features import OBLASTS
+    world = records([(o, "yellow", "2026-10-01 11:00", None) for o in OBLASTS])
+    log = logged(world, tmp_path / "log.csv")
+    scored = live.score(log, world, NOW + pd.Timedelta("7h"), MODEL)
+    assert scored.empty and live.summary(scored).empty
+    assert scored.columns.tolist() == log.columns.tolist() + ["y1", "y3", "y6", "revised",
+                                                              "final_p1", "final_p3", "final_p6"]
+    assert scored.dtypes[log.columns].equals(log.dtypes)  # `ts` stays a datetime, as in a non-empty score
 
 
 # --- the saved alerts.in.ua pulls (skipped before the first one) ---

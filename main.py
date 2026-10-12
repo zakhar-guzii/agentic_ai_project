@@ -1,4 +1,4 @@
-"""Alert Outlook CLI.  usage: python main.py {fetch,check,evaluate,predict,score,history,page}"""
+"""Alert Outlook CLI.  usage: python main.py {fetch,check,evaluate,predict,score,holdout,metrics,tune,history,page}"""
 import argparse
 import os
 from pathlib import Path
@@ -270,6 +270,60 @@ def evaluate(args):
     report.write_text('\n'.join(out) + '\n')
     summary_path.write_text(json.dumps(summary, indent=2) + '\n')
     print(json.dumps(summary, indent=2), flush=True)
+
+
+def _v2_rows(end):
+    """Forecast rows up to `end` with the daily clim28 and recent7 (v2 inputs and references), from 29 days before the
+    train start so that the first train rows have a full 28-day clim28, as `live.holdout` does."""
+    import pandas as pd
+    from alerts import data as D
+    from alerts.baselines import Climatology, RecentLevel
+    from alerts.features import ForecastTable
+    from alerts.splits import DECISION
+    start = (DECISION.bounds["train"][0] - pd.Timedelta("29D")).tz_convert("Europe/Kyiv").normalize().tz_convert("UTC")
+    rows = ForecastTable(D.history(D.load_map(), D.load_api()), start, end).rows
+    return rows.join(Climatology(28).predict(rows)).join(RecentLevel().predict(rows))
+
+
+def tune(args):
+    """Offline, Decision 12: the v2 search for one family, on CHOOSE only. Configs run in the seeded order; each is
+    fitted forward over CHOOSE and scored by pooled F1 at its max-F1 threshold on blocks 3-6, for each horizon and Platt
+    window. A finished config is appended to results/v2/search_<family>.csv; a rerun resumes. No config starts after
+    --minutes."""
+    import json
+    import time
+    import pandas as pd
+    from alerts.evaluate import Scores
+    from alerts.features import HOURS
+    from alerts.model import WINDOWS, ForwardRun, candidate, configs
+    from alerts.splits import CHOOSE
+    out = ROOT / f"results/v2/search_{args.family}.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    done = set(pd.read_csv(out).config) if out.exists() else set()
+    stop = time.time() + 60 * args.minutes
+    rows = _v2_rows(CHOOSE[1])  # nothing after CHOOSE can reach the search
+    for i, config in enumerate(configs(args.family)):
+        if i in done:
+            continue
+        if time.time() > stop:
+            break
+        began, found = time.time(), []
+        for h in HOURS:
+            c = candidate(args.family, config)
+            raw = ForwardRun([c], window=pd.Timedelta(days=max(WINDOWS))).run(rows, h, [CHOOSE])
+            first = raw[raw.scored].block.min()  # CHOOSE block 3, the first a 14-day window can calibrate
+            for w in WINDOWS:
+                cal = ForwardRun([c], window=pd.Timedelta(days=w)).calibrate(raw, h)
+                score = Scores(cal[cal.block >= first], h)
+                t = score.threshold(c.name)
+                m = score.classes(c.name, t).loc["all"]
+                found.append(dict(family=args.family, config=i, hours=h, window=w, threshold=t, f1=m.f1,
+                                  precision=m.precision, recall=m.recall, ap=m.ap, auc=m.auc, brier=score.brier(c.name),
+                                  n=int(m.n), params=json.dumps(config)))
+        pd.DataFrame(found).to_csv(out, mode="a", header=not out.exists(), index=False)
+        f1 = pd.DataFrame(found).groupby("hours").f1.max()
+        print(f"{args.family} config {i}: F1 " + " / ".join(f"{v:.4f}" for v in f1) + f" ({time.time() - began:.0f} s) "
+              f"{json.dumps(config)}", flush=True)
 
 
 def _names():
@@ -729,6 +783,10 @@ def main():
                    ).set_defaults(func=predict)
     sub.add_parser("score", help="offline: score logged forecasts whose windows closed inside the saved data"
                    ).set_defaults(func=score)
+    t = sub.add_parser("tune", help="offline: the v2 search for one family on CHOOSE (Decision 12)")
+    t.add_argument("family", choices=["logistic", "gbm", "catboost"])
+    t.add_argument("--minutes", type=float, default=45, help="start no config after this many minutes")
+    t.set_defaults(func=tune)
     sub.add_parser("metrics", help="offline: precision, recall, F1, AP and ROC-AUC of the frozen forecasts, per region "
                    "and pooled, write results/metrics_report.md").set_defaults(func=metrics)
     sub.add_parser("holdout", help="offline, once: the frozen model on the untouched holdout, the live-log score and "

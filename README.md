@@ -17,6 +17,15 @@ open artifacts/outlook.html  # Linux: xdg-open, Windows: start
 
 `python main.py ...` and `python -m alert_outlook ...` use the same commands. `--root PATH` or `ALERT_OUTLOOK_HOME` selects another checkout. Everything except `fetch` works offline from committed raw data and the three committed models.
 
+The committed data ends at **2026-10-12 15:43 Kyiv**, so `predict` and `page` show the outlook as of that moment, not today. For current data, request a personal API token from [alerts.in.ua](https://alerts.in.ua), then:
+
+```bash
+cp .env.example .env              # set ALERTS_IN_UA_TOKEN=...
+.venv/bin/alert-outlook fetch     # ~13 min; adds a new folder under data/raw/alerts_in_ua/
+.venv/bin/alert-outlook predict   # uses the newest complete pull automatically
+.venv/bin/alert-outlook page
+```
+
 | Command | Result |
 |---|---|
 | `fetch [--into PATH]` | Paced, resumable alerts.in.ua history pull; needs `ALERTS_IN_UA_TOKEN` in `.env` or environment. A full pull takes about 13 minutes. |

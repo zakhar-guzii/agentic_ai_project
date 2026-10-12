@@ -4,15 +4,15 @@ Air-raid alert history and calibrated probabilities of a new alert within **1, 3
 
 ## Quick start
 
-Python 3.11. Run from the repository root:
+Python 3.11 or 3.12 (the pinned numpy and pandas have no wheels for 3.13+). Run from the repository root:
 
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest -q
 .venv/bin/alert-outlook predict
 .venv/bin/alert-outlook page
-open artifacts/outlook.html
+open artifacts/outlook.html  # Linux: xdg-open, Windows: start
 ```
 
 `python main.py ...` and `python -m alert_outlook ...` use the same commands. `--root PATH` or `ALERT_OUTLOOK_HOME` selects another checkout. Everything except `fetch` works offline from committed raw data and the three committed models.

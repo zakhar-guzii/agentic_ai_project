@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "alert-outlook"
 version = "0.2.0"
 description = "Calibrated air-raid alert forecasts and history analytics"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dynamic = ["dependencies"]
 
 [project.optional-dependencies]

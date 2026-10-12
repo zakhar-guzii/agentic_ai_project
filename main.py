@@ -7,6 +7,8 @@ ROOT = Path(__file__).parent
 API_RAW = ROOT / "data/raw/alerts_in_ua"
 MODEL = ROOT / "models/logistic.joblib"  # the frozen step-3 forecaster
 LOG = ROOT / "results/forecast_log.csv"
+REGISTERED = "ffbce213e5e203c6246c2c2e8f4bfb4461349a5837545e487467973b18219243"  # the model SHA-256 Decision 10 scores
+REGISTRATION = "7ff31a24476be57ca7f81fe3bf1c7f52c32a7094"  # the holdout pre-registration commit (Decision 10)
 # 23 oblasts + Kyiv City; Luhansk (16) and Crimea are under a permanent alert and are not fetched
 OBLAST_UIDS = [3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31]
 
@@ -316,6 +318,103 @@ def score(args):
     print("\n" + live.NOTE)
 
 
+def holdout(args):
+    """Offline, once (Decision 10): the frozen model on the untouched holdout, from the map cutoff to where the saved
+    data end; the live-log score; the late-revision check against the first pull. Refuses to overwrite its artifacts."""
+    import gzip
+    import hashlib
+    import json
+    import subprocess
+    import pandas as pd
+    from alerts import data as D, live
+    from alerts.evaluate import Scores, bar
+    from alerts.features import HOURS
+    from alerts.model import Forecaster
+    dest = ROOT / "results"
+    report, forecasts, summary_path = (dest / f"holdout_{x}" for x in ("report.md", "forecasts.csv.gz", "summary.json"))
+    if any(p.exists() for p in (report, forecasts, summary_path)):
+        raise SystemExit("holdout artifacts already exist; refusing to overwrite the frozen final run")
+    if hashlib.sha256(MODEL.read_bytes()).hexdigest() != REGISTERED:
+        raise SystemExit("models/logistic.joblib is not the registered model")
+    end, model, a = D.api_asof(OBLAST_UIDS), Forecaster.load(MODEL), D.load_api()
+    if end <= pd.Timestamp("2026-10-11 12:46", tz="UTC"):  # where the first pull ends (Wrong #21)
+        raise SystemExit(f"the saved data end at {end}, where the first pull does: the step-7 pull is missing "
+                         "(python main.py fetch)")
+    records = D.history(D.load_map(), a)
+    rows = live.holdout(records, D.MAP_CUTOFF, end, model)
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+    names, kyiv_day = _names(), lambda ts: ts.dt.tz_convert("Europe/Kyiv").dt.strftime("%Y-%m-%d")
+    out = ["# Holdout report", "",
+           "The untouched holdout: everything after the map cutoff, never used for a decision before this run.",
+           f"\nGenerated offline, once, by `python main.py holdout` at commit `{commit}`; pre-registered at `{REGISTRATION}` "
+           "(PROCESS_LOG, Decision 10).",
+           f"Window: T from the map cutoff {D.MAP_CUTOFF} to {end}, where the saved alerts.in.ua data end; for horizon H only "
+           "rows with T + H inside it. Rows, references and scores as in the benchmark: 30-min moments, regions clear at "
+           "T, all 24 regions, daily clim28 and recent7, Brier, 1,000 whole-Kyiv-day bootstrap resamples (seed 0).",
+           f"Model: `models/logistic.joblib`, SHA-256 `{REGISTERED}`, as frozen in step 3: no refit, no recalibration.",
+           "With about three Kyiv days the day bootstrap has very few days to resample: its intervals are wide and the "
+           "registered bar is expected to be inconclusive. It is reported as registered.",
+           "History holds final API revisions (see the revision check below), as in the benchmark."]
+    skills, pooled, saved, head = {}, [], [], len(out)
+    for h in HOURS:
+        part = rows[rows[f"y{h}"].notna()].assign(**{f"y{h}": lambda r: r[f"y{h}"].astype(int)})
+        score = Scores(part, h)
+        skills[h] = {ref: score.skill(f"p{h}", f"{ref}_{h}") for ref in ("clim28", "recent7")}
+        pooled.append(dict(horizon=f"{h} h", n=len(part), base_rate=float(score.y.mean()), model=score.brier(f"p{h}"),
+                           clim28=score.brier(f"clim28_{h}"), recent7=score.brier(f"recent7_{h}"),
+                           **{f"skill_{ref}": f"{v[0]:+.4f} [{v[1]:+.4f}, {v[2]:+.4f}]" for ref, v in skills[h].items()}))
+        days = []
+        for day, d in part.groupby(kyiv_day(part.ts)):
+            sd = Scores(d, h)
+            b = sd.brier(f"p{h}")
+            days.append(dict(day=day, n=len(d), base_rate=float(sd.y.mean()), model=b,
+                             skill_clim28=1 - b / sd.brier(f"clim28_{h}"), skill_recent7=1 - b / sd.brier(f"recent7_{h}")))
+        region = score.per_oblast(f"p{h}")
+        region.insert(0, "region", region.index.map(names))
+        out += [f"\n## Horizon {h} h: per Kyiv day\n", md(pd.DataFrame(days).set_index("day"), "{:.4f}"),
+                f"\n### Per region ({h} h)\n", md(region, "{:.4f}"),
+                f"\n### Reliability ({h} h; bins [0,.1), ... [.9,1])\n", md(score.reliability(f"p{h}"), "{:.4f}")]
+        saved.append(part[["obl", "ts", f"y{h}", f"p{h}", f"clim28_{h}", f"recent7_{h}"]].set_axis(
+            ["obl", "ts", "y", "model", "clim28", "recent7"], axis=1).assign(hours=h))
+    passed, verdict = bar(skills)
+    out[head:head] = ["\n## Pooled\n", md(pd.DataFrame(pooled).set_index("horizon"), "{:.4f}"),
+                f"\nRegistered bar (both lower bounds > 0 on at least two horizons): per horizon {passed}; "
+                f"**{'PASS' if verdict else 'FAIL'}**."]
+    # the live log: replays and live forecasts apart
+    log = pd.read_csv(LOG, parse_dates=["ts", "made_at"])
+    scored = live.summary(live.score(log, records, end, model))
+    out += ["\n## Live log\n", f"{log.ts.nunique()} moment(s) logged: "
+            + ", ".join(f"{_kyiv(t):%Y-%m-%d %H:%M} Kyiv (made {(m - t) / pd.Timedelta('1h'):.1f} h after T)"
+                        for t, m in log.groupby("ts").made_at.first().items()) + ". A window is scored once it closes "
+            "inside the saved data.\n",
+            md(scored.set_index(scored.index.map(lambda i: f"{i[0]} h, {i[1]}")).rename_axis("horizon"), "{:.4f}")
+            if len(scored) else "Nothing scored.", "\n" + live.NOTE]
+    # late revisions: the same record in the first pull and in the newest one
+    old = _frozen_api(API_RAW / "20261011T1247Z").set_index("rec_id")
+    new = a.set_index("rec_id").loc[old.index.intersection(a.rec_id)]
+    old = old.loc[new.index]
+    changed = pd.DataFrame({"start": old.start != new.start, "end": old.end.notna() & (old.end != new.end),
+                            "alert_level": old.alert_level != new.alert_level})
+    before = old.start < D.MAP_CUTOFF
+    revisions = {"compared": len(old), **{k: int(v.sum()) for k, v in changed.items()},
+                 **{f"{k}, starting before the map cutoff": int((v & before).sum()) for k, v in changed.items()}}
+    out += ["\n## Late revisions\n", "The same record id in the first pull (20261011T1247Z) and in the newest: a changed "
+            "start, a changed end that was already set (an ongoing alert getting its end is not a revision), a changed "
+            "level.\n", "\n".join(f"- {k}: {v}" for k, v in revisions.items())]
+    forecasts.write_bytes(gzip.compress(pd.concat(saved, ignore_index=True).to_csv(index=False).encode(), mtime=0))
+    summary = dict(stage="holdout", git_commit=commit, registration_commit=REGISTRATION, model_sha256=REGISTERED,
+                   start=str(D.MAP_CUTOFF), end=str(end), n={h: int(rows[f"y{h}"].notna().sum()) for h in HOURS},
+                   brier={p["horizon"]: {k: p[k] for k in ("model", "clim28", "recent7")} for p in pooled},
+                   skills=skills, passed=passed, bar_passed=verdict, revisions=revisions,
+                   forecasts_sha256=hashlib.sha256(forecasts.read_bytes()).hexdigest(),
+                   manifests_sha256={str(m.relative_to(ROOT)): hashlib.sha256(m.read_bytes()).hexdigest()
+                                     for m in sorted(API_RAW.glob("*/MANIFEST.json"))})
+    report.write_text("\n".join(out) + "\n")
+    summary_path.write_text(json.dumps(summary, indent=2) + "\n")
+    print(md(pd.DataFrame(pooled).set_index("horizon"), "{:.4f}"))
+    print(f"bar: {passed} -> {'PASS' if verdict else 'FAIL'}; wrote {report.relative_to(ROOT)}")
+
+
 def _history():
     """The history analytics up to the map cutoff, nothing from the holdout: the first full Kyiv day `lo`, the daily
     table `d`, the weekly table, `per` (per region and 'all', for the year and 28 days before and after the level
@@ -480,6 +579,22 @@ def outlook():
                                        "skill vs recent7 [95% CI]": ci(summary["skills"][str(h)]["recent7"]),
                                        "both lower bounds > 0": "yes" if summary["passed"][str(h)] else "no"}
                             for h, s in scores.items()})
+    held = ROOT / "results/holdout_summary.json"
+    held = json.loads(held.read_text()) if held.exists() else None
+    held_part = ["<h3>Untouched holdout</h3>", "<p>Not scored yet: the final run is step 7.</p>"] if held is None else [
+        "<h3>Untouched holdout</h3>",
+        f"<p>The same model, unchanged, on everything after the map cutoff: T from {_kyiv(pd.Timestamp(held['start'])):%Y-%m-%d %H:%M} "
+        f"to {_kyiv(pd.Timestamp(held['end'])):%Y-%m-%d %H:%M} Kyiv, scored once as pre-registered. Only about three Kyiv days, "
+        "so the day-bootstrap intervals are wide; read them as a check, not a verdict. Its first 17.7 h were seen early by "
+        "mistake (PROCESS_LOG, Wrong #21); nothing was changed after that.</p>",
+        tab(pd.DataFrame({f"{h} h": {"n (clear region-moments)": f"{held['n'][str(h)]:,}",
+                                     "Brier, model": f"{held['brier'][f'{h} h']['model']:.4f}",
+                                     "Brier, clim28": f"{held['brier'][f'{h} h']['clim28']:.4f}",
+                                     "Brier, recent7": f"{held['brier'][f'{h} h']['recent7']:.4f}",
+                                     "skill vs clim28 [95% CI]": ci(held["skills"][str(h)]["clim28"]),
+                                     "skill vs recent7 [95% CI]": ci(held["skills"][str(h)]["recent7"]),
+                                     "both lower bounds > 0": "yes" if held["passed"][str(h)] else "no"} for h in HOURS})),
+        f"<p>Registered bar on the holdout: <b>{'PASS' if held['bar_passed'] else 'FAIL'}</b>. Details: holdout_report.md.</p>"]
     crossing = [f"{h} h vs {ref}" for h in HOURS for ref in ("clim28", "recent7") if not summary["skills"][str(h)][ref][1] > 0]
     rel = {h: s.reliability("logistic") for h, s in scores.items()}
     bins = pd.concat({f"{h} h": t for h, t in rel.items()}, axis=1)
@@ -492,7 +607,7 @@ def outlook():
                     "<p>Calibrated logistic regression, chosen from five candidates on earlier weeks and scored once on "
                     f"the historical benchmark: {_kyiv(BENCHMARK[0]):%Y-%m-%d} to the map cutoff, four weekly blocks, each "
                     "fitted only on what was known before it. The feasibility probe had already seen this window; the "
-                    "untouched holdout after the map cutoff is scored in step 7. Brier is the mean squared error of the "
+                    "untouched holdout after the map cutoff is below. Brier is the mean squared error of the "
                     "probability (lower is better); skill = 1 − Brier / the reference's Brier. References: clim28, the "
                     "region × hour rate of the last 28 days, recounted daily; recent7, the region's rate of new alerts "
                     "over the last 7 days. Intervals: 1,000 resamples of whole Kyiv days.</p>",
@@ -501,6 +616,7 @@ def outlook():
                     "bounds above zero on at least two horizons. Intervals that cross zero: "
                     f"{', '.join(crossing) or 'none'}. The scores are pooled over the 24 regions, not a guarantee for "
                     "each region (per region: benchmark_report.md).</p>",
+                    *held_part,
                     "<h3>Reliability</h3>",
                     "<p>Each point is a bin of forecasts: the mean forecast (x) against the share followed by a new alert "
                     "(y). Points on the diagonal are calibrated.</p>",
@@ -511,7 +627,7 @@ def outlook():
     foot = ["<footer><p class=\"small\">Sources: the official map snapshot (map.ukrainealarm.com) for alerts that start "
             f"before {_kyiv(D.SPLICE):%Y-%m-%d %H:%M} Kyiv, alerts.in.ua from then on (seam check: data_report.md). "
             f"Model: models/logistic.joblib, SHA-256 {rows.model_sha256.iloc[0]}. Reports: "
-            '<a href="history_report.md">history</a>, <a href="benchmark_report.md">benchmark</a>, '
+            '<a href="history_report.md">history</a>, <a href="benchmark_report.md">benchmark</a>, <a href="holdout_report.md">holdout</a>, '
             '<a href="data_report.md">data</a>. Regenerate offline: <code>python main.py predict</code>, then '
             "<code>python main.py page</code>; <code>python main.py fetch</code> pulls newer data first.</p></footer>"]
     body = "".join(head + [f"<section>{''.join(x)}</section>" for x in (now_part, history_part, quality_part)] + foot)
@@ -550,6 +666,8 @@ def main():
                    ).set_defaults(func=predict)
     sub.add_parser("score", help="offline: score logged forecasts whose windows closed inside the saved data"
                    ).set_defaults(func=score)
+    sub.add_parser("holdout", help="offline, once: the frozen model on the untouched holdout, the live-log score and "
+                   "the late-revision check").set_defaults(func=holdout)
     sub.add_parser("history", help="offline: alert load over time and the levels since the reform, write "
                    "results/history_report.md").set_defaults(func=history)
     sub.add_parser("page", help="offline: now, the next hours, history and model quality on one page, write "

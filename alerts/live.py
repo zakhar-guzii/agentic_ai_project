@@ -53,6 +53,19 @@ def score(log, records, asof, model):
     return pd.concat(out, ignore_index=True) if out else log.iloc[:0].reindex(columns=[*log.columns, *new])
 
 
+def holdout(records, lo, hi, model):
+    """The frozen model on every clear row with T in [lo, hi), as in the benchmark: 30-min moments on the :00/:30 grid,
+    daily clim28 and recent7. The table starts at 00:00 Kyiv 29 days before `lo`, so clim28 has its 28 days. y1/y3/y6
+    are NaN where T + H is after `hi`: that window has not closed."""
+    start = (lo - pd.Timedelta("29D")).tz_convert("Europe/Kyiv").normalize().tz_convert("UTC")
+    rows = ForecastTable(records, start, hi).rows
+    rows = rows.join(Climatology(28).predict(rows)).join(RecentLevel().predict(rows))
+    rows = rows[rows.ts >= lo]
+    for h in HOURS:
+        rows[f"y{h}"] = rows[f"y{h}"].where(rows.ts + pd.Timedelta(hours=h) <= hi)
+    return rows.join(model.predict(rows))
+
+
 NOTE = ("`live` rows were made before their window closed; `replay` rows after it, from a saved pull, so they are "
         "not a test of forecasting. Revision check: on the `still_clear` rows (clear at T in the current records too), "
         "`model_logged` is the Brier score of the logged forecasts and `model_recomputed` that of the forecasts on the "

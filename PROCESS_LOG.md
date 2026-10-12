@@ -711,3 +711,64 @@ A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec f
   - **After.** `live.summary` gives one row per horizon and kind: `live` when `made_at < T + H`, otherwise `replay`. The page shows the whole table through `page.scored`, with the revision check and the note that `score` prints too (`live.NOTE`).
   - **Tests.** 114 pass: 112 before, two test-first. Worked example: a forecast made at T + 1 h, the moment its 1 h window closed, is a replay at 1 h and live at 3 h. Mutation `made_at <= T + H`: caught on the assertion.
   - **Unchanged.** Nothing is scored yet, so `outlook.html` is byte-identical.
+
+## 2026-10-12: step 7 (final run)
+
+### Decision 10: the holdout pre-registration (committed before the step-7 fetch)
+
+- **The user.** One `fetch` in step 7. The live log then holds only the 2026-10-11 replay; the new moment T2 is logged, but none of its windows closes inside the data, so no live forecast is scored.
+- **Registered before the holdout is opened (Decision 4.5):**
+  1. **Model:** exactly `models/logistic.joblib`, SHA-256 `ffbce213e5e203c6246c2c2e8f4bfb4461349a5837545e487467973b18219243`. No refit, no recalibration, no tuning; the model is kept whatever the result.
+  2. **Rows, as in the benchmark:** 30-min moments on the :00/:30 grid, regions clear at T, all 24 regions, T in [MAP_CUTOFF, END), END = `api_asof` of the step-7 pull; for horizon H only rows with T + H ≤ END.
+  3. **References:** daily clim28 (counted at 00:00 Kyiv) and recent7, computed as for the benchmark.
+  4. **Scoring:** Brier of the model, clim28 and recent7; skill with the registered Kyiv-day bootstrap (1,000 resamples, seed 0); the strict bar as registered; skills per Kyiv day; per region n with the n < 100 flag; reliability. With about 3 Kyiv days the day bootstrap is expected to be wide and probably inconclusive: it is reported as it comes, no method changes afterwards.
+  5. **Live log:** `live.summary`, live and replay apart (Wrong #20).
+  6. **Late revisions:** the fresh pull vs `20261011T1247Z`, same `id`: changed `started_at`, changed non-null `finished_at`, changed `alert_level`; how many start before MAP_CUTOFF.
+  7. **Freeze:** `main.py holdout` runs once and refuses to overwrite its artifacts; no `predict` after it before submission.
+- **Plan:** [research/step-7-plan.md](research/step-7-plan.md).
+
+### Wrong #21 (mine): the holdout was opened before the step-7 fetch
+
+- **Before.** `main.py holdout` was meant to refuse until the new pull existed. Its guard asked only that a 6 h window had closed after the map cutoff. The first pull already ends 17.7 h after the cutoff (2026-10-11 12:46 UTC), so a run I meant as a refusal check scored that part of the holdout. Decision 10 registered END as `api_asof` of the step-7 pull and a single run.
+- **What it showed** (T from the map cutoff to 10-11 12:46 UTC; the model and method as registered, nothing changed):
+
+  | H | n | Brier model / clim28 / recent7 | skill vs clim28 [95% CI] | skill vs recent7 [95% CI] |
+  |---|---:|---|---|---|
+  | 1 h | 439 | 0.1596 / 0.1836 / 0.1626 | +0.1307 [+0.1188, +0.2451] | +0.0185 [+0.0112, +0.0932] |
+  | 3 h | 381 | 0.1386 / 0.1909 / 0.1461 | +0.2741 [+0.2068, +0.5997] | +0.0510 [+0.0135, +0.3044] |
+  | 6 h | 306 | 0.0988 / 0.1530 / 0.0973 | +0.3541 [+0.3264, +0.5061] | −0.0151 [−0.0275, +0.0690] |
+
+  The bar read PASS (1 and 3 h). These intervals rest on two Kyiv days, one of them 2 h long, so they mean little.
+- **After.** The user chose to log this and run as registered.
+  - The guard now refuses while the data end where the first pull does.
+  - The early artifacts were moved out of `results/`, not committed.
+  - `fetch`, then the one registered run on the full window. Its report says that its first 17.7 h were seen early.
+  - No decision depends on the early look: the model, the rows, the references, the bar and the report format were all fixed by Decision 10 before it.
+- **Lesson.** A refusal check must be run where the refusal is certain, or with the artifacts' directory read-only. A guard is tested against the case it exists for.
+
+### Step 7 result (2026-10-12 ~16:20 Kyiv)
+
+- **Data.** One pull, `20261012T1246Z`, 24 regions, no file contains the token. The saved data now end at 2026-10-12 12:43 UTC (15:43 Kyiv).
+- **Forecast moment T2 = 2026-10-12 12:43 UTC**, made 15 min after T: a live forecast. 17 of 24 regions under alert (5 red, 12 yellow). None of its windows closes inside the data, so it is not scored.
+- **The registered holdout** (Decision 10): T from the map cutoff (10-10 19:03 UTC) to 10-12 12:43 UTC, 41.7 h, three Kyiv days (the first 2 h long). Commit `7ff31a2` registered it.
+
+  | H | n | base rate | Brier model / clim28 / recent7 | skill vs clim28 [95% CI] | skill vs recent7 [95% CI] | both > 0 |
+  |---|---:|---:|---|---|---|---|
+  | 1 h | 1,089 | 0.338 | 0.1794 / 0.1931 / 0.1811 | +0.071 [+0.061, +0.245] | +0.009 [+0.002, +0.093] | yes |
+  | 3 h | 1,036 | 0.600 | 0.1585 / 0.1982 / 0.1529 | +0.200 [+0.110, +0.600] | −0.036 [−0.181, +0.304] | no |
+  | 6 h | 964 | 0.753 | 0.1178 / 0.1740 / 0.1017 | +0.323 [+0.286, +0.506] | −0.158 [−0.637, +0.069] | no |
+
+  - **Registered bar: FAIL** (1 h only). The model beats daily clim28 at every horizon. Against recent7 it is level at 1 h and worse at 3 and 6 h.
+  - **Per Kyiv day, 6 h vs recent7:** +0.07 (10-10, 40 rows), −0.07 (10-11), −0.64 (10-12). At 3 h: +0.30, +0.00, −0.18. The loss grows on 10-12.
+  - **Reading (a description, not a test).** The holdout is a period of very high load: the 6 h base rate is 0.75, against about 0.5 in the benchmark. recent7 follows the last week's level, and in such a period that is hard to beat. With three days, the intervals are wide. This does not establish that the model is worse than recent7 in general, and it does not confirm the benchmark's gains at 3 h.
+  - **Per region:** every region has n < 100 here ("quality not verified"). Skills against a reference with Brier near 0 explode (e.g. −6e17 for Donetsk, n = 1), so the per-region table is shown, not read.
+  - **The early look (Wrong #21)** on the first 17.7 h read PASS; the full registered window reads FAIL. The difference is the later hours, above all 10-12. Nothing was changed between the two.
+- **Live log.** One moment is scored: 10-11 12:46 UTC, a replay (made 20.3 h after T). 11 clear regions:
+  - Brier model / clim28 / recent7: 0.244 / 0.238 / 0.201 at 1 h; 0.184 / 0.295 / 0.184 at 3 h; 0.206 / 0.340 / 0.191 at 6 h.
+  - Revised rows 0. n = 11 is an anecdote, not evidence.
+- **Late revisions.** 16,291 records with the same id in both pulls: 0 with a changed start, 0 with a changed end that was already set, 0 with a changed level. The open limitation of step 3 does not show up between these two pulls, a day apart. The history report stayed byte-identical.
+- **Report render.** `holdout_report.md` first put the pooled table inside the 1 h section; the insertion index was hard-coded. The order was fixed and the run repeated. It is deterministic: the summary JSON and the forecast file are byte-identical to the first render. The model, rows and scores did not change.
+- **Checks.** 116 tests pass after the fetch: 114 before and two test-first. Mutations, both caught on the assertion: a window that must close strictly before `hi`; no 29-day lead (clim28 differs from the benchmark CSV on all 4,460 rows).
+  - The holdout Brier recomputed from the CSV with NumPy equals the report to 1e-12.
+  - A second `holdout` refuses. Two `page` runs give the same bytes.
+- **Frozen.** The holdout artifacts and the forecast log are final for the submission. No `predict` after this.

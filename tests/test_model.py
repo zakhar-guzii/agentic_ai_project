@@ -110,3 +110,10 @@ def test_logistic_can_take_a_reference_forecast_as_an_input():
     rows = pd.DataFrame({**SAME, "ts": S, "recent7_1": [0.1] * 10 + [0.9] * 10, "y1": [0] * 10 + [1] * 10})
     p = Logistic(refs=["recent7"]).fit(rows, 1, S).predict(rows.iloc[[0, -1]])
     assert p[0] < .2 and p[1] > .8
+
+
+def test_recalibrating_a_run_with_another_window_equals_running_with_it():
+    split, ranges = Split(DAY(0), DAY(3), DAY(3), DAY(4)), [(DAY(0), DAY(3), 3), (DAY(3), DAY(4), 1)]
+    three_days = ForwardRun([Constant()], split=split, window=pd.Timedelta("3D")).run(ROWS, 1, ranges)
+    two_days = ForwardRun([Constant()], split=split, window=pd.Timedelta("2D"))
+    assert two_days.calibrate(three_days, 1).equals(two_days.run(ROWS, 1, ranges))

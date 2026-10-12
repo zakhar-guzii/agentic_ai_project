@@ -168,7 +168,12 @@ class ForwardRun:
                         print(f"H={hours} block={s} candidate={c.name} fit={len(fit)} held={len(part)}", flush=True)
                     part[f"raw_{c.name}"] = c.fit(fit, hours, s).predict(part)
                 held.append(part)
-        raw = pd.concat(held)
+        return self.calibrate(pd.concat(held), hours, progress)
+
+    def calibrate(self, raw, hours, progress=False):
+        """`raw` (the held rows of `run`) calibrated with this run's window: `scored` and each candidate's calibrated
+        forecast, recomputed. The raw forecasts are reused, so another window needs no refit."""
+        raw = raw.copy()
         raw["scored"] = raw.block - self.window_length >= raw.ts.min()
         for c in self.candidates:
             raw[c.name] = np.nan

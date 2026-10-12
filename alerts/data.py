@@ -14,6 +14,7 @@ REGIONS = ROOT / "data/raw/regions.json"
 # alerts that start before SPLICE come from the map snapshot, the rest from alerts.in.ua (2026-09-12 00:00 Kyiv)
 SPLICE = pd.Timestamp("2026-09-11 21:00", tz="UTC")
 MAP_CUTOFF = pd.Timestamp("2026-10-10 19:03", tz="UTC")  # earliest fetch time of the snapshot's last chunks
+REFORM = pd.Timestamp("2026-09-07", tz="Europe/Kyiv").tz_convert("UTC")  # yellow/red levels start (CMU Resolution 1092)
 CITY_QUERIES = {1293: 22, 564: 12}  # Kharkiv and Zaporizhzhia cities are separate "State" entries -> their oblast
 LEVEL = {"State": "oblast", "District": "raion", "Community": "hromada"}
 
@@ -155,6 +156,24 @@ def minute_grid(ep, origin, n_min, oblasts):
         if 0 <= i < n_min:
             starts[o, i] += 1
     return state, starts
+
+
+def daily(records, lo, hi, oblasts):
+    """Per (Kyiv calendar day, region) on [lo, hi): minutes under alert (the per-oblast union of oblast and raion
+    records, so overlapping records count once), episode starts, and minutes under a red record by the same union
+    rule. Red is NaN before SPLICE: the map has no levels. History keeps each record's final level, so a record
+    that turned red counts as red for its whole length."""
+    import numpy as np
+    n = int((hi - lo).total_seconds() // 60)
+    day = (lo + pd.to_timedelta(np.arange(n), "min")).tz_convert("Europe/Kyiv").tz_localize(None).normalize()
+    state, starts = minute_grid(episodes(records, hi), lo, n, oblasts)
+    red = minute_grid(episodes(records[records.alert_level == "red"], hi), lo, n, oblasts)[0]
+    per_day = lambda a, name: pd.DataFrame(a.T, index=day, columns=oblasts).groupby(level=0).sum().stack().rename(name)
+    out = pd.concat([per_day(state, "alert"), per_day(starts, "starts"), per_day(red, "red")], axis=1)
+    out = out.rename_axis(["day", "obl"]).reset_index()
+    out.insert(2, "minutes", out.day.map(day.value_counts()))  # the day's minutes inside [lo, hi); 1380 or 1500 on DST days
+    out["red"] = out.red.where(out.day >= SPLICE.tz_convert("Europe/Kyiv").tz_localize(None))
+    return out
 
 
 def _overlap(a, b):

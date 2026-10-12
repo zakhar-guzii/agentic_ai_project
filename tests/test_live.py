@@ -167,6 +167,21 @@ def test_a_log_with_every_region_under_alert_scores_nothing(tmp_path):
     assert scored.dtypes[log.columns].equals(log.dtypes)  # `ts` stays a datetime, as in a non-empty score
 
 
+# --- the holdout ---
+def test_the_holdout_scores_clear_rows_from_lo_whose_windows_close_by_hi():
+    world = records([(VOLYN, "red", "2026-10-01 14:00", "2026-10-01 14:20")])
+    lo, hi = T("2026-10-01 12:00"), T("2026-10-01 18:00")
+    rows = live.holdout(world, lo, hi, MODEL)
+    assert (rows.ts.min(), rows.ts.max()) == (lo, T("2026-10-01 17:30")) and set(rows.ts.dt.minute) == {0, 30}
+    volyn = rows[rows.obl == VOLYN].set_index("ts")
+    assert volyn.loc[lo, ["y1", "y3", "y6"]].tolist() == [0, 1, 1]  # the start at 14:00 is within 3 and 6 h of 12:00
+    assert rows.y6.notna().groupby(rows.ts).all().loc[lambda s: s].index.tolist() == [lo]  # 12:00 + 6 h = hi
+    assert rows.y3.notna().groupby(rows.ts).all().loc[lambda s: s].index.max() == T("2026-10-01 15:00")
+    assert rows.y3[rows.ts > T("2026-10-01 15:00")].isna().all()
+    cols = ["p1", "p3", "p6", "clim28_1", "clim28_3", "clim28_6", "recent7_1", "recent7_3", "recent7_6"]
+    assert rows[cols].notna().all().all()
+
+
 # --- the saved alerts.in.ua pulls (skipped before the first one) ---
 @pytest.mark.skipif(not list(D.API_DIR.glob("*/MANIFEST.json")), reason="no alerts.in.ua pull saved yet")
 def test_the_forecast_on_the_saved_data():

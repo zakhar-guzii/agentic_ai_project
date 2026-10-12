@@ -726,3 +726,22 @@ A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec f
   6. **Late revisions:** the fresh pull vs `20261011T1247Z`, same `id`: changed `started_at`, changed non-null `finished_at`, changed `alert_level`; how many start before MAP_CUTOFF.
   7. **Freeze:** `main.py holdout` runs once and refuses to overwrite its artifacts; no `predict` after it before submission.
 - **Plan:** [research/step-7-plan.md](research/step-7-plan.md).
+
+### Wrong #21 (mine): the holdout was opened before the step-7 fetch
+
+- **Before.** `main.py holdout` was meant to refuse until the new pull existed. Its guard asked only that a 6 h window had closed after the map cutoff. The first pull already ends 17.7 h after the cutoff (2026-10-11 12:46 UTC), so a run I meant as a refusal check scored that part of the holdout. Decision 10 registered END as `api_asof` of the step-7 pull and a single run.
+- **What it showed** (T from the map cutoff to 10-11 12:46 UTC; the model and method as registered, nothing changed):
+
+  | H | n | Brier model / clim28 / recent7 | skill vs clim28 [95% CI] | skill vs recent7 [95% CI] |
+  |---|---:|---|---|---|
+  | 1 h | 439 | 0.1596 / 0.1836 / 0.1626 | +0.1307 [+0.1188, +0.2451] | +0.0185 [+0.0112, +0.0932] |
+  | 3 h | 381 | 0.1386 / 0.1909 / 0.1461 | +0.2741 [+0.2068, +0.5997] | +0.0510 [+0.0135, +0.3044] |
+  | 6 h | 306 | 0.0988 / 0.1530 / 0.0973 | +0.3541 [+0.3264, +0.5061] | −0.0151 [−0.0275, +0.0690] |
+
+  The bar read PASS (1 and 3 h). These intervals rest on two Kyiv days, one of them 2 h long, so they mean little.
+- **After.** The user chose to log this and run as registered.
+  - The guard now refuses while the data end where the first pull does.
+  - The early artifacts were moved out of `results/`, not committed.
+  - `fetch`, then the one registered run on the full window. Its report says that its first 17.7 h were seen early.
+  - No decision depends on the early look: the model, the rows, the references, the bar and the report format were all fixed by Decision 10 before it.
+- **Lesson.** A refusal check must be run where the refusal is certain, or with the artifacts' directory read-only. A guard is tested against the case it exists for.

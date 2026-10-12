@@ -574,3 +574,28 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
      - No bootstrap CI: by the deadline the log holds one moment per pull.
   6. **Holdout rule.** Every T falls after MAP_CUTOFF, so its outcomes are the untouched holdout. In step 4 `score` runs only in synthetic tests; its first real run is step 7, after that step's pre-registration.
 - **Plan:** [research/step-4-plan.md](research/step-4-plan.md).
+
+### Step 4 result (2026-10-12 ~12:08 Kyiv)
+
+- **Code.**
+  - `data.api_asof`: where the saved history ends.
+  - `alerts/live.py`:
+    - `forecast`: 24 regions at T, from records known at T;
+    - `log`: append-only, once per T;
+    - `score`: outcomes once a window closes, plus the revision check.
+  - `main.py predict | score`: offline; `predict` takes about 2 s.
+- **First forecast moment: T = 2026-10-11 12:46 UTC (15:46 Kyiv).**
+  - It was made 20.3 h after T, so all its windows had already closed. It is a replay from the saved pull, not a live forecast; `made_at` records this.
+  - At T, 13 regions were under alert (5 red, 8 yellow) and 11 were clear.
+  - An independent check straight from the records (oblast and raion records covering 12:45–12:46) gives the same regions and levels.
+  - Every row carries the registered model SHA-256, `ffbce213…`.
+- **Nothing was scored.** `score` reports that no logged window closes before 12:46, where the saved data end. The holdout stays unscored.
+- **Tests.** 97 pass: 89 old plus 8 new. Each new test either failed first, or was checked by a mutation; every mutation was caught:
+  - an alert ending at 11:59:30 counts in the minute before T (mutation: `end > T`);
+  - clim28 is counted at 00:00 Kyiv (mutation: counted at T);
+  - levels come only from records known at T (mutation: from all records, caught at 6 of 11 moments by `TruncationCheck`);
+  - "still on" is not the same as "no end" (mutation: `end.isna()`);
+  - the revision check compares the features, not only `under`;
+  - a clear region has no level (on the real pull).
+- **Small finding.** The CSV round trip keeps the features exact: the revision check also passes with exact equality. `np.isclose` stays as a margin.
+- **Unchanged.** `check` rewrote the same data report byte for byte, and `evaluate` still refuses to overwrite.

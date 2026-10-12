@@ -818,3 +818,9 @@ The analysis, with every number from `results/metrics_report.md`, is in [researc
      - Nothing is fetched until the v2 models are committed.
      - v1 and the three v2 models are scored on the same rows with these thresholds.
 - **F1, not Brier.** The user's choice. Brier, AP and AUC are reported next to it.
+
+### Wrong #23 (mine): a mutation restore widened two other guards
+
+- **Before.** For the `retrain` overwrite test, I removed the `models/v2` clause of its guard with `sed`, then put it back with a reverse `sed`. The guard's plain line was identical in `evaluate` and `holdout`, so the reverse `sed` added the clause to all three. It reached a commit (`a628ac4`). `store` is undefined in those two functions; they refuse earlier anyway, so nothing ran differently, but the code was wrong.
+- **After.** Each guard was restored by its content (`d37e05f`). Against `main`, only `retrain`'s guard differs.
+- **Lesson.** A mutation is undone by an exact replacement that is checked to occur once, never by a pattern.

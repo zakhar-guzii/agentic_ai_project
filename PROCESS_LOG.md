@@ -640,3 +640,31 @@ A spec review found two P2 bugs and one P3. Each was reproduced on a synthetic w
   4. **Red is an upper bound.** History keeps only each record's final level (yellow → red is an in-place update), so a record that turned red counts as red for its whole length.
   5. **Holdout.** The analytics stop at MAP_CUTOFF, as `check`'s per-oblast table does.
 - **Plan:** [research/step-5-plan.md](research/step-5-plan.md).
+
+### Step 5 result (2026-10-12 ~13:50 Kyiv)
+
+- **Code.**
+  - `data.daily`: per (Kyiv day, region), the day's minutes in the window, alert minutes, episode starts and red minutes. `data.REFORM` = 2026-09-07 00:00 Kyiv.
+  - `main.py history`: offline, about 1 s. It writes `results/history_report.md` from 2025-10-04 (the first full Kyiv day) to the map cutoff. A rerun gives the same bytes.
+- **One change to the plan.** The per-region table shows the share difference (after − before), not the ratio. On near-zero western bases the ratio gave `inf` for Zakarpattia (0.000 → 0.002) and 42× for Lviv (0.000 → 0.014).
+- **What the history shows (measured, nothing after the map cutoff; descriptive only):**
+  - **Load.** Share of time under alert, averaged over 24 regions: 0.291 over the year; by month 0.242 (2025-10) → 0.323 (2026-08) → 0.408 / 0.412 (2026-09 / 10). Starts per region-day: 1.99 → 3.51 → 4.93 / 5.54.
+  - **The jump came before the level reform.** In the week of 08-24 the share went 0.321 → 0.365 and starts 3.23 → 4.34, two weeks before 09-07. This confirms feasibility.md's "late August".
+  - **28 days around the reform:** share 0.340 → 0.407, starts per region-day 3.80 → 5.04.
+    - Front-line regions are near saturation and flat: Dnipropetrovska, Donetska, Zaporizka and Kharkivska stay at 0.90–0.97.
+    - The rise is in the centre and the west: Kyivska 0.351 → 0.663, Zhytomyrska 0.068 → 0.309, Kirovohradska 0.233 → 0.446, Kyiv City 0.200 → 0.337. Starts per day where they were near zero: Volynska 0.36 → 1.75, Rivnenska 0.75 → 2.96.
+  - **Raion-level alerting (week of 2025-12-15):** share 0.198, the lowest week of the year, then 0.267 the week after. No lasting break is visible in the weekly series.
+  - **Levels, 2026-09-12 → map cutoff:** red share 0.457 of alert time (an upper bound, final level only).
+    - Front line mostly red: Dnipropetrovska 0.98, Donetska 0.91, Kharkivska 0.79, Zaporizka 0.76, Sumska 0.66.
+    - Elsewhere mostly yellow: 0.02–0.22. Zakarpattia reads 1.00, but on 1 alert hour.
+    - The national weekly red share falls 0.63 → 0.52 → 0.46 → 0.45 → 0.34. Not checked: whether this is a change in the attacks or labelling practice settling after the reform.
+- **Wrong #18 (mine, in a mutation run): a crash counted as a caught mutation.**
+  - **Before.** The test "an alert still on is censored at `hi`" failed in its own helper: with every `end` missing, `astype` cannot make a naive column tz-aware. My chained command ran two mutations anyway, and both "failed", so they proved nothing. The first try of the restart mutation also failed on a numpy dtype error, not on the assertion.
+  - **After.** The helper builds `end` with `pd.to_datetime(utc=True)`, the step-4 fix. Both mutations were rerun on the green state, and both now fail on the assertion.
+  - **Rule.** A mutation counts as caught only when the failure is the test's assertion.
+- **Tests.** 108 pass: 100 before, 7 test-first in `tests/test_daily.py`, and one acceptance test on the real data. The real-data test checks starts against `episodes`, alert minutes since the splice against `compare`, `red ≤ alert`, `alert ≤ minutes`, and red NaN exactly before 09-12. Mutations, all caught on the assertion:
+  - records counted instead of episodes (the overlap test, and the real-data test);
+  - restarts merged within 2 min;
+  - an alert still on dropped;
+  - only regions with records kept.
+- **Unchanged.** `check` rewrote the same data report byte for byte. `predict` reports the moment as already logged. The monthly shares recomputed from `daily` equal the planning numbers.

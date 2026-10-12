@@ -1,6 +1,8 @@
 """The calibrated forecaster: P(an episode starts in [T, T + H)) for each forecast row."""
 import copy
 import importlib.metadata
+import itertools
+import random
 import subprocess
 from pathlib import Path
 
@@ -10,6 +12,7 @@ import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier
 from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
@@ -40,35 +43,57 @@ class Platt:
         return np.log(q / (1 - q)).reshape(-1, 1)
 
 
+def recency(ts, asof, half_life):
+    """0.5 ** (age / half_life) for rows at `ts` fitted at `asof`; None when every row counts the same."""
+    if half_life:
+        return 0.5 ** ((asof - ts) / pd.Timedelta(days=half_life)).to_numpy()
+    return None
+
+
 # A candidate forecaster has a `name`, `fit(rows, hours, asof)` on rows whose labels were known at `asof`, and
-# `predict(rows)`, the raw probability of a start within `hours`. Settings are fixed: nothing is tuned.
+# `predict(rows)`, the raw probability of a start within `hours`. Step 3 fixed every setting; v2 (Decision 12) searches
+# them.
 
-class Boosting:
-    """LightGBM at the probe's fixed settings. `clim` adds the daily clim28 rate as a feature; `half_life` (days) weights
-    each row by its age at the fit moment, so that recent weeks count more."""
+class Candidate:
+    """What the three model types share. `half_life` (days) weights each fitted row by its age at the fit moment, so
+    that recent weeks count more; `refs` adds reference forecasts (`<ref>_<H>`, e.g. clim28) as inputs; `params`
+    overrides the fixed settings; `name` labels the variant."""
 
-    def __init__(self, clim=False, half_life=None):
-        self.clim, self.half_life = clim, half_life
-        self.name = "gbm" + ("_clim" if clim else "") + ("_recent" if half_life else "")
+    columns = Features.NAMES  # a model saved before v2 has no columns of its own
 
-    def weights(self, ts, asof):
-        """0.5 ** (age / half_life) for rows at `ts` fitted at `asof`; None when every row counts the same."""
-        if self.half_life:
-            return 0.5 ** ((asof - ts) / pd.Timedelta(days=self.half_life)).to_numpy()
-        return None
+    def __init__(self, half_life=None, refs=(), params=None, name=None):
+        self.half_life, self.refs, self.params = half_life, list(refs), dict(params or {})
+        self.name = name or self.name
 
-    def fit(self, rows, hours, asof):
-        self.columns = Features.NAMES + [f"clim28_{hours}"] * self.clim
-        self.model = lgb.LGBMClassifier(**AdversarialValidation.SETTINGS).fit(
-            rows[self.columns], rows[f"y{hours}"], sample_weight=self.weights(rows.ts, asof), categorical_feature=["obl"])
-        return self
+    def inputs(self, hours):
+        """The input columns for horizon `hours`, remembered for `predict`."""
+        self.columns = Features.NAMES + [f"{r}_{hours}" for r in self.refs]
+        return self.columns
 
     def predict(self, rows):
         return self.model.predict_proba(rows[self.columns])[:, 1]
 
 
-class CatBoost:
-    """CatBoost at its library defaults (seed 0), with the oblast as a native category.
+class Boosting(Candidate):
+    """LightGBM at the probe's settings, unless `params` overrides them. `clim` adds the daily clim28 rate as an input."""
+
+    def __init__(self, clim=False, half_life=None, refs=(), params=None, name=None):
+        super().__init__(half_life, ["clim28"] * clim + list(refs), params,
+                         name or "gbm" + ("_clim" if clim else "") + ("_recent" if half_life else ""))
+        self.clim = clim
+
+    def weights(self, ts, asof):
+        return recency(ts, asof, self.half_life)
+
+    def fit(self, rows, hours, asof):
+        self.model = lgb.LGBMClassifier(**{**AdversarialValidation.SETTINGS, **self.params}).fit(
+            rows[self.inputs(hours)], rows[f"y{hours}"], sample_weight=self.weights(rows.ts, asof),
+            categorical_feature=["obl"])
+        return self
+
+
+class CatBoost(Candidate):
+    """CatBoost at its library defaults (seed 0) unless `params` overrides them, with the oblast as a native category.
 
     The library chooses the boosting mode; this is not necessarily ordered boosting.
     """
@@ -76,12 +101,10 @@ class CatBoost:
     name = "catboost"
 
     def fit(self, rows, hours, asof):
-        self.model = CatBoostClassifier(random_seed=0, verbose=0, allow_writing_files=False, cat_features=["obl"]).fit(
-            rows[Features.NAMES], rows[f"y{hours}"])
+        settings = {"random_seed": 0, "verbose": 0, "allow_writing_files": False, **self.params}
+        self.model = CatBoostClassifier(**settings, cat_features=["obl"]).fit(
+            rows[self.inputs(hours)], rows[f"y{hours}"], sample_weight=recency(rows.ts, asof, self.half_life))
         return self
-
-    def predict(self, rows):
-        return self.model.predict_proba(rows[Features.NAMES])[:, 1]
 
 
 def _hour_circle(hour):
@@ -90,22 +113,70 @@ def _hour_circle(hour):
     return np.c_[np.sin(a), np.cos(a)]
 
 
-class Logistic:
-    """Logistic regression, a linear model, at sklearn's defaults: the oblast and the weekday one-hot, the hour on a
-    circle, counts and minutes as log1p and standardised."""
+def _logit(p):
+    """Probabilities -> log odds, clipped as Platt clips them."""
+    q = np.clip(np.asarray(p, float), 1e-4, 1 - 1e-4)
+    return np.log(q / (1 - q))
+
+
+class Logistic(Candidate):
+    """Logistic regression, a linear model, at sklearn's defaults unless `params` overrides them: the oblast and the
+    weekday one-hot, the hour on a circle, counts and minutes as log1p and standardised, reference inputs as log odds
+    and standardised (a missing one gets the median of the fitted rows)."""
 
     name = "logistic"
     NUMERIC = [f for f in Features.NAMES if f not in ("obl", "hour", "dow")]
 
     def fit(self, rows, hours, asof):
-        x = ColumnTransformer([("category", OneHotEncoder(handle_unknown="ignore"), ["obl", "dow"]),
-                               ("hour", FunctionTransformer(_hour_circle), ["hour"]),
-                               ("numeric", make_pipeline(FunctionTransformer(np.log1p), StandardScaler()), self.NUMERIC)])
-        self.model = make_pipeline(x, LogisticRegression(max_iter=1000)).fit(rows[Features.NAMES], rows[f"y{hours}"])
+        refs = self.inputs(hours)[len(Features.NAMES):]
+        parts = [("category", OneHotEncoder(handle_unknown="ignore"), ["obl", "dow"]),
+                 ("hour", FunctionTransformer(_hour_circle), ["hour"]),
+                 ("numeric", make_pipeline(FunctionTransformer(np.log1p), StandardScaler()), self.NUMERIC)]
+        if refs:
+            # a reference is NaN where its history is short (clim28's first days): the median of the fitted rows
+            parts.append(("refs", make_pipeline(SimpleImputer(strategy="median"), FunctionTransformer(_logit),
+                                                StandardScaler()), refs))
+        self.model = make_pipeline(ColumnTransformer(parts), LogisticRegression(**{"max_iter": 1000, **self.params})).fit(
+            rows[self.columns], rows[f"y{hours}"], logisticregression__sample_weight=recency(rows.ts, asof, self.half_life))
         return self
 
-    def predict(self, rows):
-        return self.model.predict_proba(rows[Features.NAMES])[:, 1]
+
+# Decision 12, the v2 search. Each family also searches the inputs and the recency half-life; the Platt window
+# (WINDOWS, days) is searched by recalibrating each config's raw forecasts, so it is not in a config. FIXED settings
+# stay the same in the search and the final fit, so a refit reproduces the search.
+REFS = ["clim28", "recent7"]
+SHARED = {"refs": [(), tuple(REFS)], "half_life": [None, 30, 60, 120]}
+SPACE = {"logistic": {"C": [0.01, 0.1, 1, 10], "class_weight": [None, "balanced"]},
+         "gbm": {"n_estimators": [200, 400, 800], "learning_rate": [0.02, 0.05, 0.1], "num_leaves": [15, 31, 63, 127],
+                 "min_child_samples": [50, 200, 1000], "subsample": [0.7, 1.0], "colsample_bytree": [0.6, 0.8, 1.0],
+                 "reg_lambda": [0, 1, 10]},
+         "catboost": {"iterations": [300, 600, 1000], "learning_rate": [0.03, 0.1], "depth": [4, 6],
+                      "l2_leaf_reg": [1, 3, 10]}}
+FIXED = {"logistic": {}, "gbm": {"n_jobs": 6, "deterministic": True, "force_row_wise": True},
+         "catboost": {"thread_count": 7}}
+WINDOWS = (7, 14)
+
+
+def configs(family, seed=0):
+    """Every config of `family` ({"refs", "half_life", and the parameters}) in a fixed random order."""
+    space = {**SHARED, **SPACE[family]}
+    grid = [dict(zip(space, values)) for values in itertools.product(*space.values())]
+    random.Random(seed).shuffle(grid)
+    return grid
+
+
+def candidate(family, config):
+    """The candidate a config describes, with the family's FIXED settings."""
+    c = dict(config)
+    model = {"logistic": Logistic, "gbm": Boosting, "catboost": CatBoost}[family]
+    return model(half_life=c.pop("half_life"), refs=c.pop("refs"), params={**c, **FIXED[family]}, name=family)
+
+
+def best(search):
+    """The winner per family and horizon (Decision 12): the highest CHOOSE F1; on a tie, the first config in the seeded
+    order (then the shorter window)."""
+    s = search.sort_values(["family", "hours", "config", "window"], kind="stable")
+    return s.loc[s.groupby(["family", "hours"]).f1.idxmax()].set_index(["family", "hours"])
 
 
 class ForwardRun:
@@ -137,7 +208,12 @@ class ForwardRun:
                         print(f"H={hours} block={s} candidate={c.name} fit={len(fit)} held={len(part)}", flush=True)
                     part[f"raw_{c.name}"] = c.fit(fit, hours, s).predict(part)
                 held.append(part)
-        raw = pd.concat(held)
+        return self.calibrate(pd.concat(held), hours, progress)
+
+    def calibrate(self, raw, hours, progress=False):
+        """`raw` (the held rows of `run`) calibrated with this run's window: `scored` and each candidate's calibrated
+        forecast, recomputed. The raw forecasts are reused, so another window needs no refit."""
+        raw = raw.copy()
         raw["scored"] = raw.block - self.window_length >= raw.ts.min()
         for c in self.candidates:
             raw[c.name] = np.nan

@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alerts.features import ForecastTable
-from alerts.model import Boosting, Forecaster, ForwardRun, Logistic, Platt
+from alerts.features import Features, ForecastTable
+from alerts.baselines import Climatology, RecentLevel
+from alerts.model import REFS, Boosting, Forecaster, ForwardRun, Logistic, Platt, best, candidate, configs
 from alerts.splits import Split
 
 
@@ -72,6 +73,20 @@ def test_a_saved_forecaster_forecasts_the_same_after_loading(tmp_path):
         assert (loaded.meta["train_start"], loaded.meta["asof"]) == (first, asof)
 
 
+def test_saved_v2_forecasters_of_all_three_families_forecast_the_same_after_loading(tmp_path):
+    first, asof = pd.Timestamp("2026-09-28", tz="UTC"), pd.Timestamp("2026-10-03", tz="UTC")
+    rows = ForecastTable(world(), first, pd.Timestamp("2026-10-04", tz="UTC")).rows
+    rows = rows.join(Climatology(28).predict(rows)).join(RecentLevel().predict(rows))  # the reference inputs
+    settings = {"logistic": dict(C=0.1), "gbm": dict(n_estimators=30, min_child_samples=5), "catboost": dict(iterations=30)}
+    run = ForwardRun([candidate(f, {"refs": tuple(REFS), "half_life": 30, **p}) for f, p in settings.items()],
+                     split=Split(first, asof, asof, asof), window=pd.Timedelta("1D"))
+    raws = {h: run.run(rows, h, [(pd.Timestamp("2026-09-30", tz="UTC"), asof, 3)]) for h in (1, 3)}
+    later = rows[rows.ts >= asof]
+    for name, forecaster in run.final(rows, raws, asof).items():
+        forecaster.save(tmp_path / f"{name}.joblib")
+        assert Forecaster.load(tmp_path / f"{name}.joblib").predict(later).equals(forecaster.predict(later))
+
+
 def test_final_forecaster_calibrates_only_on_completed_oof_labels():
     asof = DAY(3)
     run = ForwardRun([Constant()], split=Split(DAY(0), asof, asof, DAY(4)), window=pd.Timedelta('2D'))
@@ -90,3 +105,46 @@ def test_progress_logs_each_scored_block_after_its_calibration(capsys):
     # one class, so no AP or AUC
     assert scored == ["H=1 block=2026-09-03 00:00:00+00:00 const: n=4 base=0.000 mean_p=0.556 brier=0.3086 ap=nan auc=nan",
                       "H=1 block=2026-09-04 00:00:00+00:00 const: n=4 base=0.000 mean_p=0.444 brier=0.1975 ap=nan auc=nan"]
+
+
+# one region at the same moment of the week: every feature equal, so a model can only learn the share of starts
+S = pd.Timestamp("2026-09-30 12:00", tz="UTC")
+SAME = {**{f: 1 for f in Features.NAMES}, "obl": 8, "hour": 12.0, "dow": 2}
+
+
+def test_logistic_weights_recent_rows_more():
+    # 10 rows with a start now, 10 without one 70 days (ten weeks) before: with a 70-day half-life the old rows weigh
+    # 1/2 each, so the forecast is 10 / (10 + 5) = 2/3; unweighted it is 1/2
+    rows = pd.DataFrame({**SAME, "ts": [S] * 10 + [S - pd.Timedelta("70D")] * 10, "y1": [1] * 10 + [0] * 10})
+    assert Logistic(half_life=70).fit(rows, 1, S).predict(rows.head(1)) == pytest.approx([2 / 3], abs=1e-3)
+    assert Logistic().fit(rows, 1, S).predict(rows.head(1)) == pytest.approx([1 / 2], abs=1e-3)
+
+
+def test_logistic_can_take_a_reference_forecast_as_an_input():
+    # every feature is the same; only the 7-day rate differs, and a start follows the high rate only
+    rows = pd.DataFrame({**SAME, "ts": S, "recent7_1": [0.1] * 10 + [0.9] * 10, "y1": [0] * 10 + [1] * 10})
+    p = Logistic(refs=["recent7"]).fit(rows, 1, S).predict(rows.iloc[[0, -1]])
+    assert p[0] < .2 and p[1] > .8
+
+
+def test_recalibrating_a_run_with_another_window_equals_running_with_it():
+    split, ranges = Split(DAY(0), DAY(3), DAY(3), DAY(4)), [(DAY(0), DAY(3), 3), (DAY(3), DAY(4), 1)]
+    three_days = ForwardRun([Constant()], split=split, window=pd.Timedelta("3D")).run(ROWS, 1, ranges)
+    two_days = ForwardRun([Constant()], split=split, window=pd.Timedelta("2D"))
+    assert two_days.calibrate(three_days, 1).equals(two_days.run(ROWS, 1, ranges))
+
+
+def test_configs_come_in_a_fixed_order_without_repeats():
+    # catboost: inputs 2 x half-life 4 x iterations 3 x learning rate 2 x depth 2 x l2 3
+    order = configs("catboost")
+    assert order == configs("catboost") != configs("catboost", seed=1)
+    assert len(order) == 288 == len({repr(sorted(c.items())) for c in order})
+
+
+def test_the_winner_has_the_highest_f1_per_family_and_horizon_and_the_first_config_on_a_tie():
+    search = pd.DataFrame([dict(family="gbm", hours=1, config=0, window=7, f1=.60),
+                           dict(family="gbm", hours=1, config=2, window=7, f1=.65),
+                           dict(family="gbm", hours=1, config=1, window=14, f1=.65),  # ties config 2, came first
+                           dict(family="gbm", hours=3, config=0, window=14, f1=.70),
+                           dict(family="logistic", hours=1, config=5, window=7, f1=.50)])
+    assert best(search).config.to_dict() == {("gbm", 1): 1, ("gbm", 3): 0, ("logistic", 1): 5}

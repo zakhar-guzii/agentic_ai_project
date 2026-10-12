@@ -75,6 +75,20 @@ def test_clear_regions_get_the_forecast_and_both_references():
     assert (now.loc[clear, ["clim28_1", "clim28_3", "clim28_6"]] == 0).all().all()
 
 
+class EchoRecent7:
+    """A stand-in for a v2 forecaster with reference inputs: its forecast is the recent7 input it was given."""
+
+    def predict(self, rows):
+        return pd.DataFrame({f"p{h}": rows[f"recent7_{h}"] for h in (1, 3, 6)}, index=rows.index)
+
+
+def test_a_model_with_reference_inputs_gets_them_at_t():
+    now = live.forecast(WORLD, NOW, EchoRecent7()).set_index("obl")
+    clear = now.under == 0
+    assert (now.loc[clear, ["p1", "p3", "p6"]].to_numpy() == now.loc[clear, ["recent7_1", "recent7_3", "recent7_6"]].to_numpy()).all()
+    assert now.loc[LVIV, "p1"] == pytest.approx(1 - np.exp(-60 / 10060))  # Lviv's own rate, as in the test above
+
+
 def random_world(seed=0, n=150):
     """Random raion alerts of both levels in 5 neighbouring oblasts over 4 days: overlaps, starts mid-minute, 3 still on
     at the end (as in test_leakage)."""

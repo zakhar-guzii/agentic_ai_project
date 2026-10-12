@@ -104,6 +104,16 @@ def scored(summary):
 
 # alert levels wear the status colours (critical, warning) and always come with an icon or a label; the three horizons
 # take categorical slots 1-3, validated all-pairs in both modes
+def switch(panels):
+    """One button per panel, {label: html}; a click shows that panel and hides the others, the first shown first. CSS
+    only, no script: each radio comes before the panels, so `#m<i>:checked~.p<i>` in CSS can reach panel i.
+    ponytail: the CSS has rules for six panels; add rules if a page ever needs more."""
+    radios = "".join(f'<input type="radio" name="model" id="m{i}"{" checked" if i == 0 else ""}>'
+                     f'<label for="m{i}">{html.escape(label)}</label>' for i, label in enumerate(panels))
+    body = "".join(f'<div class="panel p{i}">{part}</div>' for i, part in enumerate(panels.values()))
+    return f'<div class="switch">{radios}{body}</div>'
+
+
 CSS = """
 :root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--muted:#898781;
 --grid:#e1e0d9;--tile:#f0efec;--red:#d03b3b;--yellow:#fab219;--h1:#2a78d6;--h3:#eb6834;--h6:#1baf7a}
@@ -137,4 +147,10 @@ hyphens:auto;overflow-wrap:anywhere}
 .key.h1{background:var(--h1)}.key.h3{background:var(--h3)}.key.h6{background:var(--h6)}
 details{margin:8px 0}summary{cursor:pointer;color:var(--ink-2)}
 @media (max-width:480px){.tile{font-size:10px;padding:4px}.tile b{font-size:13px}}
+.switch input{position:absolute;opacity:0}.panel{display:none}
+.switch label{display:inline-block;margin:4px 6px 4px 0;padding:4px 12px;border:1px solid var(--muted);
+border-radius:999px;cursor:pointer;font-size:14px;color:var(--ink-2)}
+.switch input:checked+label{background:var(--ink);border-color:var(--ink);color:var(--page)}
+.switch input:focus-visible+label{outline:2px solid var(--h1);outline-offset:2px}
+#m0:checked~.p0,#m1:checked~.p1,#m2:checked~.p2,#m3:checked~.p3,#m4:checked~.p4,#m5:checked~.p5{display:block}
 """

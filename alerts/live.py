@@ -20,7 +20,8 @@ def forecast(records, T, model):
     midnight = T.tz_convert("Europe/Kyiv").normalize().tz_convert("UTC")
     past = ForecastTable(known, midnight - pd.Timedelta("28D"), T).rows
     clim = Climatology(28).predict(pd.concat([past, rows], ignore_index=True), asof=midnight).tail(len(rows))
-    p = pd.concat([model.predict(rows), clim.set_axis(rows.index), RecentLevel().predict(rows)], axis=1)
+    refs = pd.concat([clim.set_axis(rows.index), RecentLevel().predict(rows)], axis=1)  # also inputs of a v2 model
+    p = pd.concat([model.predict(rows.join(refs)), refs], axis=1)
     return rows.join(p.where(rows.under == 0))  # the model forecasts a new start, so only for a clear region
 
 

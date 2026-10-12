@@ -128,6 +128,8 @@ def test_the_outlook_page_is_self_contained_and_draws_no_week_after_the_map_cuto
     # ... and so is T, 10-11: the last week must end at the cutoff, Monday 00:00 Kyiv + 5 d 22:03 = 5.919 days
     days = float(re.search(r"<th>2026-10-05</th>\s*<td>([\d.]+)</td>", page).group(1))
     assert days == round((D.MAP_CUTOFF - pd.Timestamp("2026-10-05", tz="Europe/Kyiv")) / pd.Timedelta("1D"), 3)
+    if (ROOT / "results/v2/summary.json").exists():  # v2 (Decision 12): a button per model, each panel with every region
+        assert page.count('type="radio"') == 4 and all(page.count(names[o]) >= 8 for o in OBLASTS)
 
 
 @pytest.mark.skipif(not (D.API_DIR / "20261011T1247Z").exists(), reason="the frozen step-3 pull is missing")
@@ -149,3 +151,21 @@ def test_the_holdout_path_rebuilds_the_benchmark_references(m):
         assert (got[f"y{h}"] == got.y).all()
         for ref in ("clim28", "recent7"):
             assert got[f"{ref}_{h}"].to_numpy() == pytest.approx(got[ref].to_numpy(), abs=1e-12)
+
+
+@pytest.mark.skipif(not (ROOT / "results/holdout_summary.json").exists(), reason="the step-7 holdout run is missing")
+def test_the_registered_model_still_forecasts_its_frozen_holdout(m, a):
+    """v2 changes the model classes. The pickled v1 runs on the current class code, so it must still give exactly the
+    forecasts step 7 froze, on the same rows (the window end is the registered one)."""
+    import main
+    from alerts import live
+    from alerts.features import HOURS
+    from alerts.model import Forecaster
+    end = pd.Timestamp(json.loads((ROOT / "results/holdout_summary.json").read_text())["end"])
+    rows = live.holdout(D.history(m, a), D.MAP_CUTOFF, end, Forecaster.load(main.MODEL))
+    frozen = pd.read_csv(ROOT / "results/holdout_forecasts.csv.gz", parse_dates=["ts"])
+    for h in HOURS:
+        want = frozen[frozen.hours == h]
+        got = rows.merge(want, on=["obl", "ts"])
+        assert len(got) == len(want) > 900
+        assert got[f"p{h}"].to_numpy() == pytest.approx(got.model.to_numpy(), abs=1e-12)

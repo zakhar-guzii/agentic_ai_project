@@ -791,3 +791,30 @@ A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec f
 ### Weak spots (2026-10-12)
 
 The analysis, with every number from `results/metrics_report.md`, is in [research/weak-spots.md](research/weak-spots.md). In short: the model ranks regions well and moments within a region poorly; on the front line it says yes always, in the far west it never does; under high load its level lags (the global 14-day Platt), which is where recent7 beats it; at 6 h it ranks no better than clim28.
+
+## 2026-10-12: v2, retraining for maximum F1 (requested by the user)
+
+### Decision 12: a search for maximum F1 over all three families (committed before any v2 fit)
+
+- **The user.** v1 did badly on the holdout. Retrain, change every parameter that matters, and maximise F1. Save the weights of LightGBM, CatBoost and logistic regression. On the page, a button chooses the model. v2 comes first, then step 8. Plan: [research/v2-plan.md](research/v2-plan.md).
+- **What stays.** v1 and its frozen files: `models/logistic.joblib`, the forecast files, the summaries and `results/forecast_log.csv`. `predict` and the log stay on v1.
+- **Registered before any v2 fit:**
+  1. **Families.** Logistic, LightGBM (`gbm`) and CatBoost.
+  2. **Search.** The space is in the plan.
+     - Configs run in a seeded random order (seed 0).
+     - Each family runs in its own process with a 45-min box, or 30 min if the search starts after 19:00 Kyiv.
+     - Every config tried is saved with its scores.
+  3. **Score of a config.**
+     - Forward blocks over CHOOSE: fitted on the past, with a Platt on the 7 or 14 days before each block.
+     - Pooled F1 over the 24 regions on the scored blocks 3–6, at the max-F1 threshold (grid .01–.99).
+  4. **Winner.** Per family and horizon, the highest F1; on a tie, the first in the seeded order. Its threshold is fixed from then on.
+  5. **Check.** The winners run forward over BENCHMARK and the holdout (MAP_CUTOFF → 2026-10-12 12:43 UTC).
+     - Reported: precision, recall and F1 at the CHOOSE threshold, the F1 of always saying yes, AP, AUC and Brier.
+     - v1, clim28 and recent7 appear alongside, their thresholds also from CHOOSE.
+     - Both periods were seen before (the benchmark by the probe and the weak-spot analysis, the holdout by step 7 and the weak-spot analysis), but neither is used for tuning.
+  6. **Final models.** Refitted on every label known at 2026-10-12 12:43 UTC, with a Platt on the window before it. Saved to `models/v2/{logistic,gbm,catboost}.joblib` with their SHA-256.
+  7. **Untouched check, after the submission.**
+     - The data: everything after 2026-10-12 12:43 UTC.
+     - Nothing is fetched until the v2 models are committed.
+     - v1 and the three v2 models are scored on the same rows with these thresholds.
+- **F1, not Brier.** The user's choice. Brier, AP and AUC are reported next to it.

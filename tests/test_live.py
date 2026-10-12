@@ -103,9 +103,9 @@ def test_a_moment_is_logged_once(tmp_path):
     assert len(back) == 24 and (back.ts == NOW).all()
 
 
-def logged(world, path):
-    """The log of a forecast at NOW, as `predict` writes it and `score` reads it back."""
-    live.log(live.forecast(world, NOW, MODEL).assign(made_at=NOW), path)
+def logged(world, path, made=NOW):
+    """The log of a forecast at NOW, made at `made`, as `predict` writes it and `score` reads it back."""
+    live.log(live.forecast(world, NOW, MODEL).assign(made_at=made), path)
     return pd.read_csv(path, parse_dates=["ts", "made_at"])
 
 
@@ -117,6 +117,18 @@ def test_a_logged_forecast_is_scored_once_its_window_closes(tmp_path):
     # the 6 h window is still open at T + 4 h
     assert scored.loc[VOLYN, ["y1", "y3", "y6"]].tolist() == pytest.approx([0, 1, np.nan], nan_ok=True)
     assert scored.loc[LVIV, ["y1", "y3", "y6"]].tolist() == pytest.approx([0, 0, np.nan], nan_ok=True)
+
+
+def test_replays_and_timely_forecasts_are_summarised_apart(tmp_path):
+    world = records([(VOLYN, "red", "2026-10-01 14:00", "2026-10-01 14:20")])  # a start at T + 2 h
+    # made at T + 1 h, the moment its 1 h window closed: a replay at 1 h, a live forecast at 3 h
+    scored = live.score(logged(world, tmp_path / "log.csv", made=NOW + pd.Timedelta("1h")), world,
+                        NOW + pd.Timedelta("4h"), MODEL)
+    s = live.summary(scored)
+    assert s.index.tolist() == [(1, "replay"), (3, "live")]  # the 6 h window is still open at T + 4 h
+    assert s.n.tolist() == [24, 24]
+    assert s.loc[(1, "replay"), "model"] == pytest.approx((scored.p1 ** 2).mean())  # no start within 1 h
+    assert s.loc[(3, "live"), "model"] == pytest.approx(((scored.p3 - (scored.obl == VOLYN)) ** 2).mean())
 
 
 def test_features_revised_after_the_log_are_flagged(tmp_path):
@@ -135,7 +147,7 @@ def test_a_region_revised_into_an_alert_is_compared_on_the_same_rows(tmp_path):
     final = records([(LVIV, "yellow", "2026-10-01 08:00", None),  # the all-clear was withdrawn: Lviv was on at T
                      (VOLYN, "red", "2026-10-01 12:30", "2026-10-01 12:50")])
     scored = live.score(logged(first, tmp_path / "log.csv"), final, NOW + pd.Timedelta("1h"), MODEL)
-    s = live.summary(scored).loc[1]
+    s = live.summary(scored).loc[(1, "live")]
     # every logged clear row is scored as published; Lviv, under alert at T now, has no recomputed forecast
     assert (s.n, s.still_clear) == (24, 23)
     assert s.model == pytest.approx(((scored.p1 - scored.y1) ** 2).mean())

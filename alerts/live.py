@@ -54,19 +54,21 @@ def score(log, records, asof, model):
 
 
 def summary(scored):
-    """Per horizon whose windows have closed: n, and the Brier score of the model, clim28 and recent7 on all those
-    rows, as logged. The revision check compares the logged and the recomputed forecasts on the same rows: those
-    still clear at T in the current records (`still_clear`); a region revised into an alert at T has no recomputed
-    forecast."""
+    """Per horizon whose windows have closed and per kind of forecast: `live`, made before its window closed, or
+    `replay`, made after it (Decision 6), so the two are never pooled. n, and the Brier score of the model, clim28 and
+    recent7 on all those rows, as logged. The revision check compares the logged and the recomputed forecasts on the
+    same rows: those still clear at T in the current records (`still_clear`); a region revised into an alert at T has
+    no recomputed forecast."""
     out = []
     for h in HOURS:
-        part = scored[scored[f"y{h}"].notna()]
-        same = part[part[f"final_p{h}"].notna()]
-        brier = lambda col, rows=part: float(((rows[col] - rows[f"y{h}"]) ** 2).mean())
-        if len(part):
-            out.append(dict(hours=h, n=len(part), moments=part.ts.nunique(),
-                            made_before_window_closed=int((part.made_at < part.ts + pd.Timedelta(hours=h)).sum()),
-                            base_rate=float(part[f"y{h}"].mean()), model=brier(f"p{h}"), clim28=brier(f"clim28_{h}"),
-                            recent7=brier(f"recent7_{h}"), revised_rows=int(part.revised.sum()), still_clear=len(same),
-                            model_logged=brier(f"p{h}", same), model_recomputed=brier(f"final_p{h}", same)))
-    return pd.DataFrame(out).set_index("hours") if out else pd.DataFrame()
+        closed = scored[scored[f"y{h}"].notna()]
+        timely = closed.made_at < closed.ts + pd.Timedelta(hours=h)
+        for kind, part in (("live", closed[timely]), ("replay", closed[~timely])):
+            same = part[part[f"final_p{h}"].notna()]
+            brier = lambda col, rows=part: float(((rows[col] - rows[f"y{h}"]) ** 2).mean())
+            if len(part):
+                out.append(dict(hours=h, forecast=kind, n=len(part), moments=part.ts.nunique(),
+                                base_rate=float(part[f"y{h}"].mean()), model=brier(f"p{h}"), clim28=brier(f"clim28_{h}"),
+                                recent7=brier(f"recent7_{h}"), revised_rows=int(part.revised.sum()), still_clear=len(same),
+                                model_logged=brier(f"p{h}", same), model_recomputed=brier(f"final_p{h}", same)))
+    return pd.DataFrame(out).set_index(["hours", "forecast"]) if out else pd.DataFrame()

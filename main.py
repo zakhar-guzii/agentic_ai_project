@@ -287,27 +287,18 @@ def score(args):
     """Offline: Brier scores of the logged forecasts whose windows have closed inside the saved data."""
     import pandas as pd
     from alerts import data as D, live
-    from alerts.features import HOURS
     from alerts.model import Forecaster
     if not LOG.exists():
         raise SystemExit("no forecast logged yet (python main.py predict)")
     asof = D.api_asof(OBLAST_UIDS)
-    scored = live.score(pd.read_csv(LOG, parse_dates=["ts", "made_at"]), D.history(D.load_map(), D.load_api()), asof,
-                        Forecaster.load(MODEL))
-    out = []
-    for h in HOURS:
-        part = scored[scored[f"y{h}"].notna()]
-        brier = lambda col: float(((part[col] - part[f"y{h}"]) ** 2).mean())
-        if len(part):
-            out.append(dict(hours=h, n=len(part), moments=part.ts.nunique(),
-                            made_before_window_closed=int((part.made_at < part.ts + pd.Timedelta(hours=h)).sum()),
-                            base_rate=float(part[f"y{h}"].mean()), model=brier(f"p{h}"), clim28=brier(f"clim28_{h}"),
-                            recent7=brier(f"recent7_{h}"), revised_rows=int(part.revised.sum()),
-                            model_on_revised_features=brier(f"final_p{h}")))
-    if not out:
+    table = live.summary(live.score(pd.read_csv(LOG, parse_dates=["ts", "made_at"]),
+                                    D.history(D.load_map(), D.load_api()), asof, Forecaster.load(MODEL)))
+    if table.empty:
         print(f"nothing to score: no logged window closes before {asof}, where the saved data end")
         return
-    print(md(pd.DataFrame(out).set_index("hours"), "{:.4f}"))
+    print(md(table, "{:.4f}"))
+    print("\nRevision check: on the `still_clear` rows (clear at T in the current records too), `model_logged` is the "
+          "Brier score of the logged forecasts and `model_recomputed` that of the forecasts on the recomputed features.")
 
 
 def _frozen_api(directory):

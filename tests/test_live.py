@@ -103,9 +103,9 @@ def test_a_moment_is_logged_once(tmp_path):
 
 
 def logged(world, path):
-    """The log of a forecast at NOW, as `score` reads it back."""
-    live.log(live.forecast(world, NOW, MODEL), path)
-    return pd.read_csv(path, parse_dates=["ts"])
+    """The log of a forecast at NOW, as `predict` writes it and `score` reads it back."""
+    live.log(live.forecast(world, NOW, MODEL).assign(made_at=NOW), path)
+    return pd.read_csv(path, parse_dates=["ts", "made_at"])
 
 
 def test_a_logged_forecast_is_scored_once_its_window_closes(tmp_path):
@@ -126,6 +126,21 @@ def test_features_revised_after_the_log_are_flagged(tmp_path):
     # Lviv's own minutes under alert, and its 5 neighbours' nb_alert_min_24h
     assert sorted(scored.obl[scored.revised]) == sorted([LVIV] + NEIGHBOURS[LVIV])
     assert scored.filter(like="final_p").notna().all().all()  # the forecasts on the revised features, for their Brier
+
+
+def test_a_region_revised_into_an_alert_is_compared_on_the_same_rows(tmp_path):
+    first = records([(LVIV, "yellow", "2026-10-01 08:00", "2026-10-01 09:00"),
+                     (VOLYN, "red", "2026-10-01 12:30", "2026-10-01 12:50")])  # a start inside the 1 h window
+    final = records([(LVIV, "yellow", "2026-10-01 08:00", None),  # the all-clear was withdrawn: Lviv was on at T
+                     (VOLYN, "red", "2026-10-01 12:30", "2026-10-01 12:50")])
+    scored = live.score(logged(first, tmp_path / "log.csv"), final, NOW + pd.Timedelta("1h"), MODEL)
+    s = live.summary(scored).loc[1]
+    # every logged clear row is scored as published; Lviv, under alert at T now, has no recomputed forecast
+    assert (s.n, s.still_clear) == (24, 23)
+    assert s.model == pytest.approx(((scored.p1 - scored.y1) ** 2).mean())
+    rest = scored[scored.obl != LVIV]  # the revision check compares the two forecasts on the same 23 rows
+    assert s.model_logged == pytest.approx(((rest.p1 - rest.y1) ** 2).mean())
+    assert s.model_recomputed == pytest.approx(((rest.final_p1 - rest.y1) ** 2).mean())
 
 
 # --- the saved alerts.in.ua pulls (skipped before the first one) ---

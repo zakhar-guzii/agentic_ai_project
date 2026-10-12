@@ -668,3 +668,36 @@ A spec review found two P2 bugs and one P3. Each was reproduced on a synthetic w
   - an alert still on dropped;
   - only regions with records kept.
 - **Unchanged.** `check` rewrote the same data report byte for byte. `predict` reports the moment as already logged. The monthly shares recomputed from `daily` equal the planning numbers.
+
+## 2026-10-12: step 6 (outlook page)
+
+### Decision 8: one offline page from what is already saved
+
+- **The user.** "Now" as a schematic tile map plus the table. The page comes from a separate `main.py page` command; `predict` keeps its behaviour.
+- **Check before planning (nothing new scored):**
+  - Every input exists: the newest logged moment (T = 2026-10-11 12:46 UTC: 13 regions under alert, 11 clear), `data.daily` and the history tables, the frozen benchmark summary and forecast rows, and `live.summary`.
+  - The benchmark CSV recomputes the report's Brier scores: model / clim28 / recent7 = 0.1246 / 0.1348 / 0.1318 at 1 h. Its regional n < 100 flag marks only Dnipropetrovska and Donetska, at every horizon.
+- **Decisions.**
+  1. **`main.py page`, offline**, writes `results/outlook.html`. Now and next hours come from the newest logged moment: exactly what was logged and will be scored, with no forecast recomputed. It refuses when the saved data end after that moment.
+  2. **Self-contained and deterministic.** Inline CSS and SVG, no JavaScript, nothing loaded from outside, no new dependency. The page carries T and the log's `made_at`, never the wall clock, so a rerun writes the same bytes.
+  3. **Each number says what it is.**
+     - Now is the state at T; a forecast made more than 6 h after T is labelled a replay.
+     - Model quality is the historical benchmark: seen by the probe, pooled over 24 regions. Regions with benchmark n < 100 get a ⚠.
+     - The live log reads "nothing scored yet" until step 7.
+     - History stops at MAP_CUTOFF. Marker weeks are markers, not causes; the red share is an upper bound.
+  4. **English text, Ukrainian region names**, as in `predict` and the reports.
+- **Plan:** [research/step-6-plan.md](research/step-6-plan.md).
+
+### Step 6 result (2026-10-12 ~14:58 Kyiv)
+
+- **Code.**
+  - `alerts/page.py`: the schematic tile map (`TILES`, `tiles`), the weekly level bars (`bars`), the reliability chart (`reliability`) and the CSS. Pure rendering: inline SVG and HTML, no script.
+  - `main.py page`: offline, about 4 s. It writes `results/outlook.html` (49 KB) from the newest logged moment, `_history()`, the frozen benchmark files and `live.summary`. Two runs give the same bytes.
+  - `predict` and `history` now share `_table`, `_names` and `_history` with the page; `history_report.md` stayed byte-identical and `predict` prints the same table.
+- **What the page shows at T = 2026-10-11 15:46 Kyiv** (a replay, made 20.3 h after T): 13 of 24 regions under alert (5 red, 8 yellow); the weekly share of time under alert split into red / yellow / no level; the benchmark table (equal to `benchmark_report.md`) with the registered bar, the reliability chart and its table; the live log, "nothing scored yet".
+- **Design checks** (the dataviz method): alert levels wear the status colours and always carry an icon or a label; the three horizons use categorical slots 1–3, which the palette validator passes all-pairs in light and dark mode. The light-mode aqua is below 3:1, so the reliability numbers are also given as a table. Rendered in headless Chrome: light and dark mode, and at 390 px inside an iframe (headless Chrome will not open a window narrower than about 500 px). Two fixes after looking: overlapping first month labels, and tile names now hyphenate (`lang="uk"`).
+- **Wrong #19 (mine, a weak test): "the last weekly bar is the map-cutoff week" did not prove that nothing from the holdout is drawn.**
+  - **Before.** The mutation "history runs to the end of the saved data" passed the test: T, 2026-10-11, is a Sunday, so the 17.7 holdout hours fall into the same last week, 2026-10-05.
+  - **After.** The test also requires that week's length on the page to equal the time from its Monday to the map cutoff: 5.919 days, not 6.657. The mutation is now caught on the assertion.
+- **Tests.** 112 pass: 108 before, 3 test-first in `tests/test_page.py`, and one acceptance test on the real data. Mutations, all caught on the assertion: a fixed axis top; unstacked segments; a flipped and a swapped reliability axis; tiles ignoring the state; two regions in one cell; history to the data end.
+- **Unchanged.** No fetch; nothing under `data/` changed. `score` still has nothing to score: the holdout stays unscored.

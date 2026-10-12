@@ -355,7 +355,7 @@ def holdout(args):
            "With about three Kyiv days the day bootstrap has very few days to resample: its intervals are wide and the "
            "registered bar is expected to be inconclusive. It is reported as registered.",
            "History holds final API revisions (see the revision check below), as in the benchmark."]
-    skills, pooled, saved = {}, [], []
+    skills, pooled, saved, head = {}, [], [], len(out)
     for h in HOURS:
         part = rows[rows[f"y{h}"].notna()].assign(**{f"y{h}": lambda r: r[f"y{h}"].astype(int)})
         score = Scores(part, h)
@@ -377,7 +377,7 @@ def holdout(args):
         saved.append(part[["obl", "ts", f"y{h}", f"p{h}", f"clim28_{h}", f"recent7_{h}"]].set_axis(
             ["obl", "ts", "y", "model", "clim28", "recent7"], axis=1).assign(hours=h))
     passed, verdict = bar(skills)
-    out[9:9] = ["\n## Pooled\n", md(pd.DataFrame(pooled).set_index("horizon"), "{:.4f}"),
+    out[head:head] = ["\n## Pooled\n", md(pd.DataFrame(pooled).set_index("horizon"), "{:.4f}"),
                 f"\nRegistered bar (both lower bounds > 0 on at least two horizons): per horizon {passed}; "
                 f"**{'PASS' if verdict else 'FAIL'}**."]
     # the live log: replays and live forecasts apart
@@ -579,6 +579,22 @@ def outlook():
                                        "skill vs recent7 [95% CI]": ci(summary["skills"][str(h)]["recent7"]),
                                        "both lower bounds > 0": "yes" if summary["passed"][str(h)] else "no"}
                             for h, s in scores.items()})
+    held = ROOT / "results/holdout_summary.json"
+    held = json.loads(held.read_text()) if held.exists() else None
+    held_part = ["<h3>Untouched holdout</h3>", "<p>Not scored yet: the final run is step 7.</p>"] if held is None else [
+        "<h3>Untouched holdout</h3>",
+        f"<p>The same model, unchanged, on everything after the map cutoff: T from {_kyiv(pd.Timestamp(held['start'])):%Y-%m-%d %H:%M} "
+        f"to {_kyiv(pd.Timestamp(held['end'])):%Y-%m-%d %H:%M} Kyiv, scored once as pre-registered. Only about three Kyiv days, "
+        "so the day-bootstrap intervals are wide; read them as a check, not a verdict. Its first 17.7 h were seen early by "
+        "mistake (PROCESS_LOG, Wrong #21); nothing was changed after that.</p>",
+        tab(pd.DataFrame({f"{h} h": {"n (clear region-moments)": f"{held['n'][str(h)]:,}",
+                                     "Brier, model": f"{held['brier'][f'{h} h']['model']:.4f}",
+                                     "Brier, clim28": f"{held['brier'][f'{h} h']['clim28']:.4f}",
+                                     "Brier, recent7": f"{held['brier'][f'{h} h']['recent7']:.4f}",
+                                     "skill vs clim28 [95% CI]": ci(held["skills"][str(h)]["clim28"]),
+                                     "skill vs recent7 [95% CI]": ci(held["skills"][str(h)]["recent7"]),
+                                     "both lower bounds > 0": "yes" if held["passed"][str(h)] else "no"} for h in HOURS})),
+        f"<p>Registered bar on the holdout: <b>{'PASS' if held['bar_passed'] else 'FAIL'}</b>. Details: holdout_report.md.</p>"]
     crossing = [f"{h} h vs {ref}" for h in HOURS for ref in ("clim28", "recent7") if not summary["skills"][str(h)][ref][1] > 0]
     rel = {h: s.reliability("logistic") for h, s in scores.items()}
     bins = pd.concat({f"{h} h": t for h, t in rel.items()}, axis=1)
@@ -591,7 +607,7 @@ def outlook():
                     "<p>Calibrated logistic regression, chosen from five candidates on earlier weeks and scored once on "
                     f"the historical benchmark: {_kyiv(BENCHMARK[0]):%Y-%m-%d} to the map cutoff, four weekly blocks, each "
                     "fitted only on what was known before it. The feasibility probe had already seen this window; the "
-                    "untouched holdout after the map cutoff is scored in step 7. Brier is the mean squared error of the "
+                    "untouched holdout after the map cutoff is below. Brier is the mean squared error of the "
                     "probability (lower is better); skill = 1 − Brier / the reference's Brier. References: clim28, the "
                     "region × hour rate of the last 28 days, recounted daily; recent7, the region's rate of new alerts "
                     "over the last 7 days. Intervals: 1,000 resamples of whole Kyiv days.</p>",
@@ -600,6 +616,7 @@ def outlook():
                     "bounds above zero on at least two horizons. Intervals that cross zero: "
                     f"{', '.join(crossing) or 'none'}. The scores are pooled over the 24 regions, not a guarantee for "
                     "each region (per region: benchmark_report.md).</p>",
+                    *held_part,
                     "<h3>Reliability</h3>",
                     "<p>Each point is a bin of forecasts: the mean forecast (x) against the share followed by a new alert "
                     "(y). Points on the diagonal are calibrated.</p>",
@@ -610,7 +627,7 @@ def outlook():
     foot = ["<footer><p class=\"small\">Sources: the official map snapshot (map.ukrainealarm.com) for alerts that start "
             f"before {_kyiv(D.SPLICE):%Y-%m-%d %H:%M} Kyiv, alerts.in.ua from then on (seam check: data_report.md). "
             f"Model: models/logistic.joblib, SHA-256 {rows.model_sha256.iloc[0]}. Reports: "
-            '<a href="history_report.md">history</a>, <a href="benchmark_report.md">benchmark</a>, '
+            '<a href="history_report.md">history</a>, <a href="benchmark_report.md">benchmark</a>, <a href="holdout_report.md">holdout</a>, '
             '<a href="data_report.md">data</a>. Regenerate offline: <code>python main.py predict</code>, then '
             "<code>python main.py page</code>; <code>python main.py fetch</code> pulls newer data first.</p></footer>"]
     body = "".join(head + [f"<section>{''.join(x)}</section>" for x in (now_part, history_part, quality_part)] + foot)

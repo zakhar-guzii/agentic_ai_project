@@ -624,3 +624,19 @@ A spec review found two P2 bugs and one P3. Each was reproduced on a synthetic w
   - `still_clear` counting all n rows;
   - an untyped empty score (its `ts` loses the datetime type).
 - **Unchanged.** `predict` reports the moment as already logged. `score` has nothing to score, because the saved data end at T, so the holdout stays unscored.
+
+## 2026-10-12: step 5 (history analytics)
+
+### Decision 7: what the history analytics count
+
+- **The user.** The minimal scope: weekly load, the reform windows and the red share. No hour-of-day profile.
+- **Check before planning (descriptive only, nothing modelled, nothing after MAP_CUTOFF):**
+  - National share of time under alert: 0.24 in 2025-10, 0.32 in 2026-08, 0.41 in 2026-09 and 10. Starts per region-day: 2.0 → 3.5 → 4.9–5.5.
+  - Red share of alert minutes, SPLICE → MAP_CUTOFF: 0.46 overall, falling from 0.66 on 09-12 to 0.22–0.31 on 10-08 → 10-10.
+- **Decisions.**
+  1. **One data function, `data.daily`.** Per (Kyiv day, region): the minutes of the day in the window, minutes under alert (the union of oblast and raion records), episode starts (restarts count), and red minutes by the same union rule as the live level. Red is NaN before SPLICE: the map has no levels. Weeks, months and reform windows are groupbys of this table.
+  2. **Reform windows:** 28 days on each side of 2026-09-07 00:00 Kyiv, so both sides have the same length.
+  3. **Markers, not causes.** The report marks 2025-12-15 (raion-level alerting) and 2026-09-07 (levels). The rise began in late August (feasibility.md), so the before/after table describes, it does not attribute.
+  4. **Red is an upper bound.** History keeps only each record's final level (yellow → red is an in-place update), so a record that turned red counts as red for its whole length.
+  5. **Holdout.** The analytics stop at MAP_CUTOFF, as `check`'s per-oblast table does.
+- **Plan:** [research/step-5-plan.md](research/step-5-plan.md).

@@ -746,7 +746,7 @@ A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec f
   - No decision depends on the early look: the model, the rows, the references, the bar and the report format were all fixed by Decision 10 before it.
 - **Lesson.** A refusal check must be run where the refusal is certain, or with the artifacts' directory read-only. A guard is tested against the case it exists for.
 
-### Step 7 result (2026-10-12 ~16:20 Kyiv)
+### Step 7 result (2026-10-12 ~16:00 Kyiv)
 
 - **Data.** One pull, `20261012T1246Z`, 24 regions, no file contains the token. The saved data now end at 2026-10-12 12:43 UTC (15:43 Kyiv).
 - **Forecast moment T2 = 2026-10-12 12:43 UTC**, made 15 min after T: a live forecast. 17 of 24 regions under alert (5 red, 12 yellow). None of its windows closes inside the data, so it is not scored.

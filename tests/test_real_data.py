@@ -108,3 +108,23 @@ def test_daily_history_adds_up(m, a):
     # alert time from the splice on = the minutes `compare` counts on the same window (another code path, data report)
     hc = h[h.level.isin(CORE)]
     assert d[d.day >= pd.Timestamp("2026-09-12")].alert.sum() == D.compare(hc, hc, D.SPLICE, D.MAP_CUTOFF).loc["all", "minutes_a"]
+
+
+@need_api
+def test_the_outlook_page_is_self_contained_and_draws_no_week_after_the_map_cutoff():
+    """Step 6: the page loads nothing from outside, shows every region at the newest logged moment, and its history
+    stops at the map cutoff (everything after it is the holdout)."""
+    import re
+    import main
+    from alerts.features import OBLASTS
+    page = main.outlook()
+    assert not re.search(r"<script|src=|<link|@import|url\(", page)
+    names = {int(x["regionId"]): x["regionName"] for x in json.loads(D.REGIONS.read_text())["states"]}
+    assert all(names[o] in page for o in OBLASTS)
+    T = pd.read_csv(main.LOG, parse_dates=["ts"]).ts.max()
+    assert f"{T.tz_convert('Europe/Kyiv'):%Y-%m-%d %H:%M} Kyiv" in page
+    weeks = re.findall(r"<title>Week of (\d{4}-\d{2}-\d{2})", page)
+    assert (weeks[0], weeks[-1], len(weeks)) == ("2025-09-29", "2026-10-05", 54)  # the cutoff, 10-10, is in the last
+    # ... and so is T, 10-11: the last week must end at the cutoff, Monday 00:00 Kyiv + 5 d 22:03 = 5.919 days
+    days = float(re.search(r"<th>2026-10-05</th>\s*<td>([\d.]+)</td>", page).group(1))
+    assert days == round((D.MAP_CUTOFF - pd.Timestamp("2026-10-05", tz="Europe/Kyiv")) / pd.Timedelta("1D"), 3)

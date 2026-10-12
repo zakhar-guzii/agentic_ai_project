@@ -18,7 +18,7 @@ def bars(weeks, notes):
     for k in range(round(top * 10) + 1):
         out.append(f'<line class="grid" x1="{LEFT}" x2="{W}" y1="{y(k / 10):.1f}" y2="{y(k / 10):.1f}"/>'
                    f'<text class="tick" x="{LEFT - 4}" y="{y(k / 10) + 3:.1f}" text-anchor="end">{k * 10}%</text>')
-    month = None
+    labelled = False
     for i, (week, r) in enumerate(weeks.iterrows()):
         x, base, parts = LEFT + i * slot, 0.0, []
         for cls, name in (("red", "red"), ("yellow", "yellow"), ("grey", "no level")):
@@ -29,10 +29,11 @@ def bars(weeks, notes):
                 parts.append(f"{name} {r[cls]:.1%}")
         out.append(f'<rect class="hit" x="{x:.1f}" y="{TOP}" width="{slot:.1f}" height="{H}"><title>Week of {week}: '
                    f'under alert {base:.1%} ({", ".join(parts)})</title></rect>')
-        if week[:7] != month:  # a month label under its first week; the year on the first one and in January
-            month, d = week[:7], dt.date.fromisoformat(week)
-            label = f"{d:%b %Y}" if d.month == 1 or i == 0 else f"{d:%b}"
+        d = dt.date.fromisoformat(week)
+        if d.day <= 7:  # a month label under its first Monday; the year on the first label and in January
+            label = f"{d:%b %Y}" if d.month == 1 or not labelled else f"{d:%b}"
             out.append(f'<text class="tick" x="{x:.1f}" y="{TOP + H + 14}">{label}</text>')
+            labelled = True
         if week in notes:
             end = x > W / 2  # a label near the right edge runs leftwards
             out.append(f'<line class="marker" x1="{x:.1f}" x2="{x:.1f}" y1="{TOP - 2}" y2="{TOP + H}"/>'
@@ -80,7 +81,7 @@ def tiles(rows, names):
     """The schematic map at T: one tile per region in its TILES cell, coloured by its state then (a red or yellow
     alert, or clear); a clear tile shows P(a new alert starts within 3 h). `rows`: one forecast row per region."""
     rows = rows.set_index("obl")
-    out = ['<div class="map">']
+    out = ['<div class="map" lang="uk">']
     for obl, (r, c) in TILES.items():
         x = rows.loc[obl]
         state = x.level if x.under else "clear"
@@ -101,7 +102,7 @@ body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-a
 main{max-width:880px;margin:0 auto;padding:16px}
 section{background:var(--surface);border-radius:12px;padding:16px;margin:16px 0}
 h1{font-size:26px;margin:8px 0 0}h2{font-size:19px;margin:0 0 8px}
-p,li{color:var(--ink-2)}.small{font-size:13px}
+p,li{color:var(--ink-2)}.small{font-size:13px}footer{overflow-wrap:anywhere}
 .scroll{overflow-x:auto}
 table{border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums;margin:8px 0}
 th,td{padding:4px 10px;border-bottom:1px solid var(--grid);text-align:right;white-space:nowrap}
@@ -116,7 +117,7 @@ polyline.h1{stroke:var(--h1)}polyline.h3{stroke:var(--h3)}polyline.h6{stroke:var
 circle{stroke:var(--surface);stroke-width:2}circle.h1{fill:var(--h1)}circle.h3{fill:var(--h3)}circle.h6{fill:var(--h6)}
 .map{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;max-width:640px;margin:8px 0}
 .tile{background:var(--tile);border-radius:6px;padding:6px;min-height:48px;font-size:12px;line-height:1.25;
-overflow-wrap:anywhere}
+hyphens:auto;overflow-wrap:anywhere}
 .tile b{display:block;font-size:15px;margin-top:2px}
 .tile.red{background:var(--red);color:#fff}.tile.yellow{background:var(--yellow);color:#0b0b0b}
 .key{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px}

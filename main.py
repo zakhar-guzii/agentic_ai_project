@@ -761,7 +761,7 @@ def outlook():
     made = rows.made_at.iloc[0]
     tab = lambda df, fmt="{:.3f}": f'<div class="scroll">{df.to_html(border=0, na_rep="", float_format=fmt.format)}</div>'
     key = lambda *items: '<p class="small">' + "".join(f'<span class="key {c}"></span>{t}' for c, t in items) + "</p>"
-    # model quality: the frozen historical benchmark, read as in results/model_usage.md, and the live log
+    # model quality: the frozen historical benchmark, and the live log
     summary = json.loads((ROOT / "results/benchmark_summary.json").read_text())
     b = pd.read_csv(ROOT / "results/benchmark_forecasts.csv.gz", parse_dates=["ts"])
     b = b[b.scored & (b.ts >= BENCHMARK[0])]

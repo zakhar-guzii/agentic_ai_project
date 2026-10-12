@@ -1,9 +1,9 @@
 # Prior solutions survey: every public KSE Stage 2 air-raid repo
 
 _Survey date: 2026-10-10/11. Companion files:_
-- [prior-solutions-cards.md](prior-solutions-cards.md): per-repo review cards for 115 repos (working notes).
+- [prior-solutions-cards.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/prior-solutions-cards.md): per-repo review cards for 115 repos (working notes).
 - [prior-solutions-scores.csv](prior-solutions-scores.csv): automatic features and heuristic score for all 190 repos.
-- [existing-solutions.md](existing-solutions.md): first-pass survey, including academic work.
+- [existing-solutions.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/existing-solutions.md): first-pass survey, including academic work.
 - [data-sources.md](data-sources.md): data access, freshness and leakage traps.
 - [brief.md](brief.md): our task text.
 
@@ -51,7 +51,7 @@ _Survey date: 2026-10-10/11. Companion files:_
   - modelling and evaluation: models, baselines, metrics, split type, calibration, leakage mentions;
   - data handling: timezone handling, raion/hromada handling, data sources;
   - product and documentation: dashboard/API, AI-usage section, limitations section, latest date in the README.
-- **Qualitative review.** Three parallel subagents covered 39 + 38 + 38 repos. Each repo got a card covering framing, data, target, methods, evaluation, a leakage check of the code, text use, product, engineering, documentation and process, ideas to borrow and red flags. Each repo was rated 1–5 on "likely passed" (LP) and on technical quality (T). The cards are in [prior-solutions-cards.md](prior-solutions-cards.md).
+- **Qualitative review.** Three parallel subagents covered 39 + 38 + 38 repos. Each repo got a card covering framing, data, target, methods, evaluation, a leakage check of the code, text use, product, engineering, documentation and process, ideas to borrow and red flags. Each repo was rated 1–5 on "likely passed" (LP) and on technical quality (T). The cards are in [prior-solutions-cards.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/prior-solutions-cards.md).
 - **Limits of this method.**
   - The AI logs and reflections, KSE's main signal, are not public.
   - Ground truth is a single passer.

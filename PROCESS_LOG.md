@@ -483,7 +483,7 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
 ### Step-3 continuation (2026-10-11)
 
 - The previous session stopped after writing the serialization test, before implementing `Forecaster`. Its test failed at import; it also constructed an invalid date (`2026-09-028`). Corrected that date, then implemented `ForwardRun.final` and trusted-artifact joblib save/load. Horizons own separate fitted models and OOF calibrators; metadata includes counts, feature names, versions, cutoff and the code commit.
-- Recovered the approved plan into `research/step-3-plan.md`. The user explicitly limited the resumed scope to step 3. No live features, page, new candidates, blend, tuning or holdout scoring is included.
+- Recovered the approved plan into [research/step-3-plan.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/step-3-plan.md). The user explicitly limited the resumed scope to step 3. No live features, page, new candidates, blend, tuning or holdout scoring is included.
 - The registered choice and strict benchmark bar from Decision 5 are unchanged. Completion uses the fixed choice rule; no new discretionary blend is introduced after viewing correlations.
 - Added `Scores`, Kyiv-day block bootstrap (1,000 resamples, seed 0), per-region counts, reliability, error correlations and the strict bar. Worked examples tested: daily skills -0.5/+0.5 give CI [-0.5,+0.5]; 99 rows are flagged, 100 are not; both references must have lower CI > 0 on at least two horizons. Zero-reference-loss or undefined intervals cannot count as a pass.
 - Added the offline `evaluate choose|benchmark` CLI. Benchmark refuses before pre-registration; either stage refuses to overwrite frozen reports/forecasts/summary. Data use is pinned to the first API pull and the frozen map; later pulls cannot change this evaluation. Source-manifest and output SHA-256 hashes are recorded.
@@ -573,7 +573,7 @@ A review found two P2 bugs. Both were reproduced on the data and fixed test-firs
      - Decision 4's revision check: the forecast at T is recomputed from the current history. The rows whose features changed and the model's Brier on them are reported.
      - No bootstrap CI: by the deadline the log holds one moment per pull.
   6. **Holdout rule.** Every T falls after MAP_CUTOFF, so its outcomes are the untouched holdout. In step 4 `score` runs only in synthetic tests; its first real run is step 7, after that step's pre-registration.
-- **Plan:** [research/step-4-plan.md](research/step-4-plan.md).
+- **Plan:** [research/step-4-plan.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/step-4-plan.md).
 
 ### Step 4 result (2026-10-12 ~12:08 Kyiv)
 
@@ -639,7 +639,7 @@ A spec review found two P2 bugs and one P3. Each was reproduced on a synthetic w
   3. **Markers, not causes.** The report marks 2025-12-15 (raion-level alerting) and 2026-09-07 (levels). The rise began in late August (feasibility.md), so the before/after table describes, it does not attribute.
   4. **Red is an upper bound.** History keeps only each record's final level (yellow → red is an in-place update), so a record that turned red counts as red for its whole length.
   5. **Holdout.** The analytics stop at MAP_CUTOFF, as `check`'s per-oblast table does.
-- **Plan:** [research/step-5-plan.md](research/step-5-plan.md).
+- **Plan:** [research/step-5-plan.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/step-5-plan.md).
 
 ### Step 5 result (2026-10-12 ~13:50 Kyiv)
 
@@ -686,7 +686,7 @@ A spec review found two P2 bugs and one P3. Each was reproduced on a synthetic w
      - The live log reads "nothing scored yet" until step 7.
      - History stops at MAP_CUTOFF. Marker weeks are markers, not causes; the red share is an upper bound.
   4. **English text, Ukrainian region names**, as in `predict` and the reports.
-- **Plan:** [research/step-6-plan.md](research/step-6-plan.md).
+- **Plan:** [research/step-6-plan.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/step-6-plan.md).
 
 ### Step 6 result (2026-10-12 ~14:58 Kyiv)
 
@@ -704,7 +704,7 @@ A spec review found two P2 bugs and one P3. Each was reproduced on a synthetic w
 
 ### Code review of step 6 (2026-10-12)
 
-A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec finding (P2). The reviewer also asked for a refresh button and a current map; the user chose the full scope (the fix, a local server with a Refresh button, real oblast outlines). Plan: [research/step-6-review-plan.md](research/step-6-review-plan.md). The live view and the map come after step 7: they change how the page looks, never a score.
+A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec finding (P2). The reviewer also asked for a refresh button and a current map; the user chose the full scope (the fix, a local server with a Refresh button, real oblast outlines). Plan: [research/step-6-review-plan.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/step-6-review-plan.md). The live view and the map come after step 7: they change how the page looks, never a score.
 
 - **Wrong #20: the page's Live log would have pooled replays with timely forecasts and hidden the revision check.**
   - **Before.** The page kept 7 of `live.summary`'s columns and dropped `made_before_window_closed`, `still_clear`, `model_logged` and `model_recomputed`. After step 7's fetch, the 2026-10-11 replay (made 20.3 h after T) would be scored in one row with the new timely forecasts, and nothing on the page would say so. Decision 6.4 had promised the two apart.
@@ -725,7 +725,7 @@ A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec f
   5. **Live log:** `live.summary`, live and replay apart (Wrong #20).
   6. **Late revisions:** the fresh pull vs `20261011T1247Z`, same `id`: changed `started_at`, changed non-null `finished_at`, changed `alert_level`; how many start before MAP_CUTOFF.
   7. **Freeze:** `main.py holdout` runs once and refuses to overwrite its artifacts; no `predict` after it before submission.
-- **Plan:** [research/step-7-plan.md](research/step-7-plan.md).
+- **Plan:** [research/step-7-plan.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/step-7-plan.md).
 
 ### Wrong #21 (mine): the holdout was opened before the step-7 fetch
 
@@ -796,7 +796,7 @@ The analysis, with every number from `results/metrics_report.md`, is in [researc
 
 ### Decision 12: a search for maximum F1 over all three families (committed before any v2 fit)
 
-- **The user.** v1 did badly on the holdout. Retrain, change every parameter that matters, and maximise F1. Save the weights of LightGBM, CatBoost and logistic regression. On the page, a button chooses the model. v2 comes first, then step 8. Plan: [research/v2-plan.md](research/v2-plan.md).
+- **The user.** v1 did badly on the holdout. Retrain, change every parameter that matters, and maximise F1. Save the weights of LightGBM, CatBoost and logistic regression. On the page, a button chooses the model. v2 comes first, then step 8. Plan: [research/v2-plan.md](https://github.com/zakhar-guzii/agentic_ai_project/blob/fbc16df/research/v2-plan.md).
 - **What stays.** v1 and its frozen files: `models/logistic.joblib`, the forecast files, the summaries and `results/forecast_log.csv`. `predict` and the log stay on v1.
 - **Registered before any v2 fit:**
   1. **Families.** Logistic, LightGBM (`gbm`) and CatBoost.

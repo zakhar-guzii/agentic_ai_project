@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from alerts.baselines import Climatology
+from alerts.baselines import Climatology, RecentLevel
 from alerts.checks import TruncationCheck
 from alerts.features import AlertGrid, Features, ForecastTable
 
@@ -156,14 +156,20 @@ def forecasts(run):
     stops with the block that holds T: later blocks would calibrate on labels nobody has yet."""
     def at(records, moment):
         rows = ForecastTable(records, FIRST, END).rows
-        rows = rows.join(Climatology(28).predict(rows))  # the clim28 feature of gbm_clim
+        rows = rows.join(Climatology(28).predict(rows)).join(RecentLevel().predict(rows))  # the reference inputs
         days = (moment.floor("D") - BLOCKS_FROM).days + 1
         out = run.run(rows, 1, [(BLOCKS_FROM, BLOCKS_FROM + pd.Timedelta(days=days), days)])
         return out.loc[out.ts == moment, ["obl"] + [c.name for c in run.candidates]].reset_index(drop=True)
     return at
 
 
-@pytest.mark.parametrize("candidate", [Boosting(), Boosting(clim=True), Boosting(half_life=60), CatBoost(), Logistic()],
+REFS = ["clim28", "recent7"]
+V2 = [Boosting(refs=REFS, half_life=30, params=dict(n_estimators=50, num_leaves=7, min_child_samples=5), name="gbm_v2"),
+      CatBoost(refs=REFS, half_life=30, params=dict(iterations=50, depth=4), name="catboost_v2"),
+      Logistic(refs=REFS, half_life=30, params=dict(C=0.1, class_weight="balanced"), name="logistic_v2")]
+
+
+@pytest.mark.parametrize("candidate", [Boosting(), Boosting(clim=True), Boosting(half_life=60), CatBoost(), Logistic(), *V2],
                          ids=lambda c: c.name)
 def test_a_calibrated_forecast_uses_nothing_from_t_on(candidate):
     run = ForwardRun([candidate], split=SMALL, window=pd.Timedelta("1D"))

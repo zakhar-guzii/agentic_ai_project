@@ -701,3 +701,13 @@ A spec review found two P2 bugs and one P3. Each was reproduced on a synthetic w
   - **After.** The test also requires that week's length on the page to equal the time from its Monday to the map cutoff: 5.919 days, not 6.657. The mutation is now caught on the assertion.
 - **Tests.** 112 pass: 108 before, 3 test-first in `tests/test_page.py`, and one acceptance test on the real data. Mutations, all caught on the assertion: a fixed axis top; unstacked segments; a flipped and a swapped reliability axis; tiles ignoring the state; two regions in one cell; history to the data end.
 - **Unchanged.** No fetch; nothing under `data/` changed. `score` still has nothing to score: the holdout stays unscored.
+
+### Code review of step 6 (2026-10-12)
+
+A Standards + Spec review of 6de1891...9936766: no Standards finding, one Spec finding (P2). The reviewer also asked for a refresh button and a current map; the user chose the full scope (the fix, a local server with a Refresh button, real oblast outlines). Plan: [research/step-6-review-plan.md](research/step-6-review-plan.md). The live view and the map come after step 7: they change how the page looks, never a score.
+
+- **Wrong #20: the page's Live log would have pooled replays with timely forecasts and hidden the revision check.**
+  - **Before.** The page kept 7 of `live.summary`'s columns and dropped `made_before_window_closed`, `still_clear`, `model_logged` and `model_recomputed`. After step 7's fetch, the 2026-10-11 replay (made 20.3 h after T) would be scored in one row with the new timely forecasts, and nothing on the page would say so. Decision 6.4 had promised the two apart.
+  - **After.** `live.summary` gives one row per horizon and kind: `live` when `made_at < T + H`, otherwise `replay`. The page shows the whole table through `page.scored`, with the revision check and the note that `score` prints too (`live.NOTE`).
+  - **Tests.** 114 pass: 112 before, two test-first. Worked example: a forecast made at T + 1 h, the moment its 1 h window closed, is a replay at 1 h and live at 3 h. Mutation `made_at <= T + H`: caught on the assertion.
+  - **Unchanged.** Nothing is scored yet, so `outlook.html` is byte-identical.

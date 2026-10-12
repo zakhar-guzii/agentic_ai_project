@@ -312,9 +312,8 @@ def score(args):
     if table.empty:
         print(f"nothing to score: no clear region's logged window closes by {asof}, where the saved data end")
         return
-    print(md(table, "{:.4f}"))
-    print("\nRevision check: on the `still_clear` rows (clear at T in the current records too), `model_logged` is the "
-          "Brier score of the logged forecasts and `model_recomputed` that of the forecasts on the recomputed features.")
+    print(md(table.set_index(table.index.map(lambda i: f"{i[0]} h, {i[1]}")).rename_axis("horizon"), "{:.4f}"))
+    print("\n" + live.NOTE)
 
 
 def _history():
@@ -487,8 +486,8 @@ def outlook():
     bins.index = [f"{10 * i}–{10 * i + 10}%" for i in bins.index]
     lived = (f"<p>{log.ts.nunique()} forecast moment(s) logged, the newest at {_kyiv(T):%Y-%m-%d %H:%M} Kyiv. "
              + ("Nothing scored yet: no logged window closes inside the saved data. The first live score is step 7.</p>"
-                if scored.empty else "Scored windows:</p>" +
-                tab(scored[["n", "moments", "base_rate", "model", "clim28", "recent7", "revised_rows"]], "{:.4f}")))
+                if scored.empty else "Scored windows, per horizon and kind:</p>" + P.scored(scored) +
+                f'<p class="small">{live.NOTE.replace("`", "")}</p>'))
     quality_part = ["<h2>Model quality</h2>",
                     "<p>Calibrated logistic regression, chosen from five candidates on earlier weeks and scored once on "
                     f"the historical benchmark: {_kyiv(BENCHMARK[0]):%Y-%m-%d} to the map cutoff, four weekly blocks, each "

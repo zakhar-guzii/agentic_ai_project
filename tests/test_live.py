@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alerts import data as D
+from alert_outlook.data import history as D
 
 T = lambda s: pd.Timestamp(s, tz="UTC")
 
@@ -28,10 +28,10 @@ def test_saved_data_end_at_the_earliest_of_the_newest_server_snapshots(tmp_path)
 
 
 # --- the forecast at T ---
-from alerts import live  # noqa: E402
-from alerts.model import Forecaster  # noqa: E402
+from alert_outlook.forecasting import live  # noqa: E402
+from alert_outlook.forecasting.model import Forecaster  # noqa: E402
 
-MODEL = Forecaster.load(D.ROOT / "models/logistic.joblib")  # the frozen step-3 forecaster
+MODEL = Forecaster.load(D.ROOT / "models/logistic.joblib")  # migrated logistic v2
 VOLYN, RIVNE, LVIV = 8, 5, 27
 NOW = T("2026-10-01 12:00")
 
@@ -102,7 +102,7 @@ def random_world(seed=0, n=150):
 
 
 def test_the_forecast_uses_nothing_from_t_on():
-    from alerts.checks import TruncationCheck
+    from alert_outlook.data.validation import TruncationCheck
     moments = pd.date_range("2026-10-01 00:00", "2026-10-03 23:00", freq="7h13min", tz="UTC").append(
         pd.DatetimeIndex([T("2026-10-03 23:59")]))  # after the alerts still on at the end have started
     at = lambda records, moment: live.forecast(records, moment, MODEL)
@@ -146,7 +146,7 @@ def test_replays_and_timely_forecasts_are_summarised_apart(tmp_path):
 
 
 def test_features_revised_after_the_log_are_flagged(tmp_path):
-    from alerts.features import NEIGHBOURS
+    from alert_outlook.forecasting.features import NEIGHBOURS
     first = records([(LVIV, "yellow", "2026-10-01 08:00", "2026-10-01 09:00")])
     final = records([(LVIV, "yellow", "2026-10-01 08:00", "2026-10-01 09:30")])  # the all-clear was revised later
     scored = live.score(logged(first, tmp_path / "log.csv"), final, NOW + pd.Timedelta("1h"), MODEL)
@@ -171,7 +171,7 @@ def test_a_region_revised_into_an_alert_is_compared_on_the_same_rows(tmp_path):
 
 
 def test_a_log_with_every_region_under_alert_scores_nothing(tmp_path):
-    from alerts.features import OBLASTS
+    from alert_outlook.forecasting.features import OBLASTS
     world = records([(o, "yellow", "2026-10-01 11:00", None) for o in OBLASTS])
     log = logged(world, tmp_path / "log.csv")
     scored = live.score(log, world, NOW + pd.Timedelta("7h"), MODEL)
@@ -199,8 +199,19 @@ def test_the_holdout_scores_clear_rows_from_lo_whose_windows_close_by_hi():
 # --- the saved alerts.in.ua pulls (skipped before the first one) ---
 @pytest.mark.skipif(not list(D.API_DIR.glob("*/MANIFEST.json")), reason="no alerts.in.ua pull saved yet")
 def test_the_forecast_on_the_saved_data():
-    from main import OBLAST_UIDS
+    from alert_outlook.settings import OBLAST_UIDS
     now = live.forecast(D.history(D.load_map(), D.load_api()), D.api_asof(OBLAST_UIDS), MODEL)
     under = now.under == 1
     assert len(now) == 24 and now.level[under].isin(["yellow", "red"]).all() and now.level[~under].isna().all()
     assert now.loc[~under, ["p1", "p3", "p6"]].apply(lambda c: c.between(0, 1)).all().all()
+
+
+def test_log_keeps_three_models_and_new_weights_at_the_same_time(tmp_path):
+    path = tmp_path / 'forecasts.csv'
+    base = pd.DataFrame(dict(obl=[14], ts=[NOW], p1=[.2]))
+    for name in ('logistic', 'lightgbm', 'catboost'):
+        rows = base.assign(model=name, model_sha256='v1')
+        assert live.log(rows, path)
+        assert not live.log(rows, path)
+    assert live.log(base.assign(model='logistic', model_sha256='v2'), path)
+    assert len(pd.read_csv(path)) == 4

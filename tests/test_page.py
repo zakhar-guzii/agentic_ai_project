@@ -3,8 +3,8 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import pytest
 
-from alerts import page
-from alerts.features import OBLASTS
+from alert_outlook.presentation import graphics as page
+from alert_outlook.forecasting.features import OBLASTS
 
 
 def marks(svg, tag, cls):

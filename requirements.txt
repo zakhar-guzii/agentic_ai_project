@@ -6,3 +6,5 @@ catboost==1.2.10
 # scikit-learn 1.5.2 passes L-BFGS-B options that SciPy 1.18 removes
 scipy==1.17.1
 joblib==1.6.0
+
+mlflow==3.16.1

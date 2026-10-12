@@ -3,19 +3,13 @@ import sys
 from pathlib import Path
 
 
-def test_benchmark_refuses_to_run_before_the_choice_is_registered():
-    result = subprocess.run([sys.executable, '-c', 'import alerts.model as m; m.CHOSEN = None; import sys; sys.argv = ["main.py", "evaluate", "benchmark"]; import main; main.main()'],
-                            cwd=Path(__file__).resolve().parent.parent, capture_output=True, text=True)
-    assert result.returncode != 0
-    assert 'pre-register' in result.stderr
+def test_help_exposes_current_commands_without_loading_data():
+    result = subprocess.run([sys.executable, '-m', 'alert_outlook', '--help'], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert all(command in result.stdout for command in ('train', 'evaluate', 'predict', 'page'))
+    assert 'retrain' not in result.stdout and 'holdout' not in result.stdout
 
 
-def test_retrain_refuses_to_overwrite_v2_artifacts(tmp_path, monkeypatch):
-    import pytest
-    import main
-    (tmp_path / "models/v2").mkdir(parents=True)
-    (tmp_path / "models/v2/gbm.joblib").write_text("frozen")
-    monkeypatch.setattr(main, "ROOT", tmp_path)
-    with pytest.raises(SystemExit, match="refusing"):
-        main.retrain(None)
-    assert (tmp_path / "models/v2/gbm.joblib").read_text() == "frozen"
+def test_evaluate_requires_run_and_period():
+    result = subprocess.run([sys.executable, '-m', 'alert_outlook', 'evaluate'], capture_output=True, text=True)
+    assert result.returncode == 2 and '--run-id' in result.stderr and '--period' in result.stderr

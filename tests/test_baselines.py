@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alerts.baselines import Climatology, Persistence, RecentLevel
+from alert_outlook.forecasting.baselines import Climatology, Persistence, RecentLevel
 
 K = lambda s: pd.Timestamp(s, tz="Europe/Kyiv").tz_convert("UTC")
 VOLYN = 8

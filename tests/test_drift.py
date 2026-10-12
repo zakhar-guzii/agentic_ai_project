@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alerts.checks import AdversarialValidation
+from alert_outlook.data.validation import AdversarialValidation
 
 COLUMNS = ["a", "b", "c", "d"]
 DAYS = lambda start, n: pd.date_range(start, periods=n, freq="D", tz="UTC")

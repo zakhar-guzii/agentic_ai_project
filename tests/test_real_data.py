@@ -8,11 +8,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from alerts import data as D
+from alert_outlook.data import history as D
 
 ROOT = Path(__file__).resolve().parent.parent
 PULLS = sorted(D.API_DIR.glob("*/MANIFEST.json"))
-need_api = pytest.mark.skipif(not PULLS, reason="no alerts.in.ua pull saved yet (python main.py fetch)")
+need_api = pytest.mark.skipif(not PULLS, reason="no alerts.in.ua pull saved yet (alert-outlook fetch)")
 CORE = ["oblast", "raion"]
 
 
@@ -53,7 +53,7 @@ def test_seam_meets_the_bar(m, a):
     assert s.loc["all", "jaccard"] >= 0.99
     assert s.loc["all", "a_in_b"] >= 0.98 and s.loc["all", "b_in_a"] >= 0.98
     # per oblast on exact seconds: the minute grid adds up to 1 min per episode edge, which dominates quiet
-    # oblasts (Zakarpattia: 65 alert-minutes -> 0.956 on minutes, 0.990 exact); see PROCESS_LOG
+    # oblasts (Zakarpattia: 65 alert-minutes -> 0.956 on minutes, 0.990 exact); original snapshot acceptance value
     assert (s.drop("all").jaccard_s >= 0.97).all(), s.jaccard_s[s.jaccard_s < 0.97].to_dict()
 
 
@@ -74,10 +74,10 @@ def test_splice_keeps_every_alert(m, a):
 
 @need_api
 def test_labels_and_baselines_reproduce_the_feasibility_probe(m, a):
-    """research/feasibility.md section 3: the probe's test window, its 21 oblasts, its numbers. The bar was set before
+    """Historical feasibility acceptance values: the probe's test window, its 21 oblasts, its numbers. The bar was set before
     the run; the data differ slightly (alerts.in.ua after the splice, AIR only, regions.json levels)."""
-    from alerts.baselines import Climatology, Persistence
-    from alerts.features import ForecastTable
+    from alert_outlook.forecasting.baselines import Climatology, Persistence
+    from alert_outlook.forecasting.features import ForecastTable
     start, last = pd.Timestamp("2026-09-12 21:00", tz="UTC"), pd.Timestamp("2026-10-10 13:00", tz="UTC")
     rows = ForecastTable(D.history(m, a), pd.Timestamp("2026-08-01", tz="UTC"), D.MAP_CUTOFF).rows
     rows = rows[~rows.obl.isin([9, 22, 28])]  # the probe's train-only exclusion: >= 80% of the time under alert
@@ -95,7 +95,7 @@ def test_labels_and_baselines_reproduce_the_feasibility_probe(m, a):
 @need_api
 def test_daily_history_adds_up(m, a):
     """Step 5: the per-day table neither loses nor invents alert time or starts, up to the map cutoff."""
-    from alerts.features import OBLASTS
+    from alert_outlook.forecasting.features import OBLASTS
     h = D.history(m, a)
     h = h[h.start < D.MAP_CUTOFF]
     lo = pd.Timestamp("2025-10-04", tz="Europe/Kyiv").tz_convert("UTC")
@@ -110,62 +110,28 @@ def test_daily_history_adds_up(m, a):
     assert d[d.day >= pd.Timestamp("2026-09-12")].alert.sum() == D.compare(hc, hc, D.SPLICE, D.MAP_CUTOFF).loc["all", "minutes_a"]
 
 
+
+
 @need_api
-def test_the_outlook_page_is_self_contained_and_draws_no_week_after_the_map_cutoff():
-    """Step 6: the page loads nothing from outside, shows every region at the newest logged moment, and its history
-    stops at the map cutoff (everything after it is the holdout)."""
+def test_the_outlook_has_three_models_and_history_stops_at_map_cutoff():
     import re
-    import main
-    from alerts.features import OBLASTS
-    page = main.outlook()
-    assert not re.search(r"<script|src=|<link|@import|url\(", page)
-    names = {int(x["regionId"]): x["regionName"] for x in json.loads(D.REGIONS.read_text())["states"]}
-    assert all(names[o] in page for o in OBLASTS)
-    T = pd.read_csv(main.LOG, parse_dates=["ts"]).ts.max()
-    assert f"{T.tz_convert('Europe/Kyiv'):%Y-%m-%d %H:%M} Kyiv" in page
-    weeks = re.findall(r"<title>Week of (\d{4}-\d{2}-\d{2})", page)
-    assert (weeks[0], weeks[-1], len(weeks)) == ("2025-09-29", "2026-10-05", 54)  # the cutoff, 10-10, is in the last
-    # ... and so is T, 10-11: the last week must end at the cutoff, Monday 00:00 Kyiv + 5 d 22:03 = 5.919 days
-    days = float(re.search(r"<th>2026-10-05</th>\s*<td>([\d.]+)</td>", page).group(1))
-    assert days == round((D.MAP_CUTOFF - pd.Timestamp("2026-10-05", tz="Europe/Kyiv")) / pd.Timedelta("1D"), 3)
-    if (ROOT / "results/v2/summary.json").exists():  # v2 (Decision 12): a button per model, each panel with every region
-        assert page.count('type="radio"') == 4 and all(page.count(names[o]) >= 8 for o in OBLASTS)
-
-
-@pytest.mark.skipif(not (D.API_DIR / "20261011T1247Z").exists(), reason="the frozen step-3 pull is missing")
-def test_the_holdout_path_rebuilds_the_benchmark_references(m):
-    """Step 7: `live.holdout` builds rows and references as the benchmark did. On the last benchmark week, from the
-    frozen pull, its clim28 and recent7 equal the frozen benchmark CSV's. Nothing after the map cutoff is read."""
-    import main
-    from alerts import live
-    from alerts.features import HOURS
-    from alerts.model import Forecaster
-    records = D.history(m, main._frozen_api(D.API_DIR / "20261011T1247Z"))
-    lo = D.MAP_CUTOFF - pd.Timedelta("7D")
-    rows = live.holdout(records[records.start < D.MAP_CUTOFF], lo, D.MAP_CUTOFF, Forecaster.load(main.MODEL))
-    b = pd.read_csv(ROOT / "results/benchmark_forecasts.csv.gz", parse_dates=["ts"])
-    for h in HOURS:
-        want = b[(b.hours == h) & b.scored & (b.ts >= lo)]
-        got = rows[rows[f"y{h}"].notna()].merge(want, on=["obl", "ts"], suffixes=("", "_b"))
-        assert len(got) == len(want) == rows[f"y{h}"].notna().sum() > 3000
-        assert (got[f"y{h}"] == got.y).all()
-        for ref in ("clim28", "recent7"):
-            assert got[f"{ref}_{h}"].to_numpy() == pytest.approx(got[ref].to_numpy(), abs=1e-12)
-
-
-@pytest.mark.skipif(not (ROOT / "results/holdout_summary.json").exists(), reason="the step-7 holdout run is missing")
-def test_the_registered_model_still_forecasts_its_frozen_holdout(m, a):
-    """v2 changes the model classes. The pickled v1 runs on the current class code, so it must still give exactly the
-    forecasts step 7 froze, on the same rows (the window end is the registered one)."""
-    import main
-    from alerts import live
-    from alerts.features import HOURS
-    from alerts.model import Forecaster
-    end = pd.Timestamp(json.loads((ROOT / "results/holdout_summary.json").read_text())["end"])
-    rows = live.holdout(D.history(m, a), D.MAP_CUTOFF, end, Forecaster.load(main.MODEL))
-    frozen = pd.read_csv(ROOT / "results/holdout_forecasts.csv.gz", parse_dates=["ts"])
-    for h in HOURS:
-        want = frozen[frozen.hours == h]
-        got = rows.merge(want, on=["obl", "ts"])
-        assert len(got) == len(want) > 900
-        assert got[f"p{h}"].to_numpy() == pytest.approx(got.model.to_numpy(), abs=1e-12)
+    from alert_outlook.forecasting import live
+    from alert_outlook.forecasting.model import Forecaster
+    from alert_outlook.presentation.history import analytics
+    from alert_outlook.presentation.page import render
+    from alert_outlook.settings import Paths, FAMILIES, OBLAST_UIDS
+    from alert_outlook.experiments.tracking import digest
+    paths = Paths()
+    records, T = D.saved(paths)
+    rows = pd.concat([live.forecast(records,T,Forecaster.load(paths.models/f'{f}.joblib')).assign(
+        model=f, made_at=T+pd.Timedelta('1D'), model_sha256=digest(paths.models/f'{f}.joblib'))
+        for f in FAMILIES], ignore_index=True)
+    page = render(rows, D.names(paths), analytics(paths))
+    assert not re.search(r'<script|src=|<link|@import|url\(',page)
+    assert page.count('type="radio"') == 3
+    assert all(page.count(D.names(paths)[o]) >= 6 for o in OBLAST_UIDS)
+    assert f'{T.tz_convert("Europe/Kyiv"):%Y-%m-%d %H:%M} Kyiv' in page
+    weeks = re.findall(r'<title>Week of (\d{4}-\d{2}-\d{2})', page)
+    assert (weeks[0],weeks[-1],len(weeks)) == ('2025-09-29','2026-10-05',54)
+    days = float(re.search(r'<th>2026-10-05</th>\s*<td>([\d.]+)</td>',page).group(1))
+    assert days == round((D.MAP_CUTOFF-pd.Timestamp('2026-10-05',tz='Europe/Kyiv'))/pd.Timedelta('1D'),3)

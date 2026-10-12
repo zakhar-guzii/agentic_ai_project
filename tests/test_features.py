@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from alerts.features import AlertGrid, Features, ForecastTable
+from alert_outlook.forecasting.features import AlertGrid, Features, ForecastTable
 
 T = lambda s: pd.Timestamp(s, tz="UTC")
 VOLYN, RIVNE, LVIV = 8, 5, 27  # Volyn borders Rivne and Lviv only

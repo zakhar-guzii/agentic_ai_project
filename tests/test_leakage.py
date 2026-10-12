@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
 
-from alerts.baselines import Climatology, RecentLevel
-from alerts.checks import TruncationCheck
-from alerts.features import AlertGrid, Features, ForecastTable
+from alert_outlook.forecasting.baselines import Climatology, RecentLevel
+from alert_outlook.data.validation import TruncationCheck
+from alert_outlook.forecasting.features import AlertGrid, Features, ForecastTable
 
 T = lambda s: pd.Timestamp(s, tz="UTC")
 ORIGIN, END = T("2026-09-20 00:00"), T("2026-10-04 00:00")
@@ -47,9 +47,9 @@ def test_climatology_uses_nothing_from_t_on():
 # --- the real history (skipped before the first alerts.in.ua pull) ---
 import pytest  # noqa: E402
 
-from alerts import data as D  # noqa: E402
-from alerts.model import Boosting, CatBoost, ForwardRun, Logistic  # noqa: E402
-from alerts.splits import BENCHMARK, CHOOSE, DECISION, Split  # noqa: E402
+from alert_outlook.data import history as D  # noqa: E402
+from alert_outlook.forecasting.model import Boosting, CatBoost, ForwardRun, Logistic  # noqa: E402
+from alert_outlook.forecasting.splits import BENCHMARK, CHOOSE, DECISION, Split  # noqa: E402
 
 need_api = pytest.mark.skipif(not list(D.API_DIR.glob("*/MANIFEST.json")), reason="no alerts.in.ua pull saved yet")
 

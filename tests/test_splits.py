@@ -1,6 +1,6 @@
 import pandas as pd
 
-from alerts.splits import Split
+from alert_outlook.forecasting.splits import Split
 
 T = lambda s: pd.Timestamp(s, tz="UTC")
 SPLIT = Split(T("2026-08-01 00:00"), T("2026-08-29 00:00"), T("2026-09-13 00:00"), T("2026-10-10 00:00"))

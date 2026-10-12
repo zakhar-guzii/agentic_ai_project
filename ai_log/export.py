@@ -7,13 +7,13 @@ import gzip
 import json
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from alert_outlook.settings import Paths
+
+ROOT = Paths().root
 OUT = ROOT / "ai_log"
 CLAUDE = Path.home() / ".claude/projects" / str(ROOT).replace("/", "-").replace("_", "-")
 CODEX = Path.home() / ".codex/sessions"
-SECRETS = [line.split("=", 1)[1].strip().strip("\"'") for line in (ROOT / ".env").read_text().splitlines()
-           if "=" in line and not line.startswith("#")]
-SECRETS = [s for s in SECRETS if len(s) >= 8]
+SECRETS = [s for s in Paths(ROOT).secrets().values() if len(s) >= 8]
 
 
 def codex_cwd(path):

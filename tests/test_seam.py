@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from alerts import data
+from alert_outlook.data import history as data
 
 T = lambda s: pd.Timestamp(s, tz="UTC")
 LO, HI = T("2026-10-01 00:00"), T("2026-10-02 00:00")

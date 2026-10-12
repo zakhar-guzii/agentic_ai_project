@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alerts.evaluate import Scores
+from alert_outlook.forecasting.evaluation import Scores
 
 
 def test_skill_bootstraps_whole_kyiv_days_with_their_row_counts():
@@ -27,7 +27,7 @@ def test_per_oblast_flags_99_rows_but_not_100():
 
 
 def test_bar_requires_both_references_on_at_least_two_horizons():
-    from alerts.evaluate import bar
+    from alert_outlook.forecasting.evaluation import bar
     skills = {h: {'clim28': (.1, .01, .2), 'recent7': (.1, .01, .2)} for h in (1, 3, 6)}
     skills[6]['clim28'] = (.1, 0., .2)  # strictly positive, not >= 0
     assert bar(skills) == ({1: True, 3: True, 6: False}, True)

@@ -2,7 +2,7 @@ import json
 
 import pandas as pd
 
-from alerts import data
+from alert_outlook.data import history as data
 
 T = lambda s: pd.Timestamp(s, tz="UTC")
 REGIONS = {"states": [

@@ -3,7 +3,7 @@ import urllib.error
 
 import pytest
 
-from alerts import api
+from alert_outlook.data import sources as api
 
 TOK = "secret-token-123"
 

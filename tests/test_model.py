@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alerts.features import Features, ForecastTable
-from alerts.baselines import Climatology, RecentLevel
-from alerts.model import REFS, Boosting, Forecaster, ForwardRun, Logistic, Platt, best, candidate, configs
-from alerts.splits import Split
+from alert_outlook.forecasting.features import Features, ForecastTable
+from alert_outlook.forecasting.baselines import Climatology, RecentLevel
+from alert_outlook.forecasting.model import REFS, Boosting, Forecaster, ForwardRun, Logistic, Platt, best, candidate, configs
+from alert_outlook.forecasting.splits import Split
 
 
 def test_platt_maps_each_forecast_to_its_observed_rate():
@@ -97,10 +97,12 @@ def test_final_forecaster_calibrates_only_on_completed_oof_labels():
     assert final.predict(ROWS[ROWS.ts >= asof]).p1.tolist() == pytest.approx([4 / 9] * 5, abs=1e-3)
 
 
-def test_progress_logs_each_scored_block_after_its_calibration(capsys):
+def test_progress_logs_each_scored_block_after_its_calibration(caplog):
+    import logging
+    caplog.set_level(logging.INFO)
     run = ForwardRun([Constant()], split=Split(DAY(0), DAY(3), DAY(3), DAY(4)), window=pd.Timedelta("2D"))
     run.run(ROWS, 1, [(DAY(0), DAY(3), 3), (DAY(3), DAY(4), 1)], progress=True)
-    scored = [line for line in capsys.readouterr().out.splitlines() if "brier=" in line]
+    scored = [line for line in [r.getMessage() for r in caplog.records] if "brier=" in line]
     # day 2: four held rows (23:30 is purged: its hour ends in the next block), no start, all at 5/9 -> Brier 25/81;
     # one class, so no AP or AUC
     assert scored == ["H=1 block=2026-09-03 00:00:00+00:00 const: n=4 base=0.000 mean_p=0.556 brier=0.3086 ap=nan auc=nan",

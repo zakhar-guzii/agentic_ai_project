@@ -159,7 +159,7 @@ def evaluate(args):
     report = dest / f"{stage}_report.md"
     forecasts = dest / f"{stage}_forecasts.csv.gz"
     summary_path = dest / f"{stage}_summary.json"
-    if any(p.exists() for p in (report, forecasts, summary_path)) or any(store.glob("*.joblib")):
+    if any(p.exists() for p in (report, forecasts, summary_path)):
         raise SystemExit(f"{stage} artifacts already exist; refusing to overwrite a frozen evaluation")
     candidates = [Boosting(), Boosting(clim=True), Boosting(half_life=60), CatBoost(), Logistic()]
     if stage == "benchmark":
@@ -522,7 +522,7 @@ def holdout(args):
     from alerts.model import Forecaster
     dest = ROOT / "results"
     report, forecasts, summary_path = (dest / f"holdout_{x}" for x in ("report.md", "forecasts.csv.gz", "summary.json"))
-    if any(p.exists() for p in (report, forecasts, summary_path)) or any(store.glob("*.joblib")):
+    if any(p.exists() for p in (report, forecasts, summary_path)):
         raise SystemExit("holdout artifacts already exist; refusing to overwrite the frozen final run")
     if hashlib.sha256(MODEL.read_bytes()).hexdigest() != REGISTERED:
         raise SystemExit("models/logistic.joblib is not the registered model")

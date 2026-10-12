@@ -1,5 +1,7 @@
 import json
 
+import numpy as np
+
 import pandas as pd
 import pytest
 
@@ -23,3 +25,63 @@ def test_saved_data_end_at_the_earliest_of_the_newest_server_snapshots(tmp_path)
     assert D.api_asof([3, 4], tmp_path) == T("2026-10-11 12:48")
     with pytest.raises(KeyError):
         D.api_asof([3, 4, 5], tmp_path)  # uid 5 was never fetched
+
+
+# --- the forecast at T ---
+from alerts import live  # noqa: E402
+from alerts.model import Forecaster  # noqa: E402
+
+MODEL = Forecaster.load(D.ROOT / "models/logistic.joblib")  # the frozen step-3 forecaster
+VOLYN, RIVNE, LVIV = 8, 5, 27
+NOW = T("2026-10-01 12:00")
+
+
+def records(rows):
+    """(oblast_id, alert_level, start, end) -> raion-level AIR records; end None = still on."""
+    return pd.DataFrame([dict(oblast_id=o, level="raion", alert_level=lvl, start=T(s), end=T(e) if e else pd.NaT)
+                         for o, lvl, s, e in rows])
+
+
+WORLD = records([(VOLYN, "yellow", "2026-10-01 11:00", None), (VOLYN, "red", "2026-10-01 11:30", "2026-10-01 11:59:30"),
+                 (RIVNE, "yellow", "2026-10-01 11:30", None),
+                 (LVIV, "yellow", "2026-10-01 10:00", "2026-10-01 10:20"), (LVIV, "red", "2026-10-01 12:05", None)])
+
+
+def test_regions_under_alert_now_get_their_level():
+    now = live.forecast(WORLD, NOW, MODEL).set_index("obl")
+    assert len(now) == 24
+    assert now.index[now.under == 1].tolist() == [RIVNE, VOLYN]
+    # Volyn's red alert ended at 11:59:30, inside the minute before T; Lviv's red one starts after T
+    assert now.level.dropna().to_dict() == {RIVNE: "yellow", VOLYN: "red"}
+
+
+def test_clear_regions_get_the_forecast_and_both_references():
+    now = live.forecast(WORLD, NOW, MODEL).set_index("obl")
+    p, clear = ["p1", "p3", "p6"], now.under == 0
+    assert clear.sum() == 22 and now.loc[clear, p].apply(lambda c: c.between(0, 1)).all().all()
+    assert now.loc[[RIVNE, VOLYN], p + ["clim28_1", "recent7_1"]].isna().all().all()  # no forecast while an alert is on
+    # recent7: Lviv had 1 start in the 10 060 clear minutes of the last 7 days
+    assert now.loc[LVIV, ["recent7_1", "recent7_3", "recent7_6"]].tolist() == pytest.approx(
+        [1 - np.exp(-60 * h / 10060) for h in (1, 3, 6)])
+    # clim28 is counted at 00:00 Kyiv, as in the benchmark: today's alerts are not in it yet, so no start at all
+    assert (now.loc[clear, ["clim28_1", "clim28_3", "clim28_6"]] == 0).all().all()
+
+
+def random_world(seed=0, n=150):
+    """Random raion alerts of both levels in 5 neighbouring oblasts over 4 days: overlaps, starts mid-minute, 3 still on
+    at the end (as in test_leakage)."""
+    rng = np.random.default_rng(seed)
+    start = T("2026-09-30 00:00") + pd.to_timedelta(rng.uniform(0, 4 * 86400, n), "s")
+    r = pd.DataFrame({"oblast_id": rng.choice([8, 5, 27, 14, 31], n), "level": "raion",
+                      "alert_level": rng.choice(["yellow", "red"], n), "start": start,
+                      "end": start + pd.to_timedelta(rng.uniform(30, 4 * 3600, n), "s")})
+    r.loc[r.start.nlargest(3).index, "end"] = pd.NaT
+    return r
+
+
+def test_the_forecast_uses_nothing_from_t_on():
+    from alerts.checks import TruncationCheck
+    moments = pd.date_range("2026-10-01 00:00", "2026-10-03 23:00", freq="7h13min", tz="UTC").append(
+        pd.DatetimeIndex([T("2026-10-03 23:59")]))  # after the alerts still on at the end have started
+    at = lambda records, moment: live.forecast(records, moment, MODEL)
+    assert TruncationCheck(random_world()).mismatches(at, moments) == []

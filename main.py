@@ -262,24 +262,40 @@ def evaluate(args):
     print(json.dumps(summary, indent=2), flush=True)
 
 
+def _names():
+    """Region id -> its name in regions.json."""
+    import json
+    from alerts.data import REGIONS
+    return {int(x["regionId"]): x["regionName"] for x in json.loads(REGIONS.read_text())["states"]}
+
+
+def _kyiv(t):
+    """A UTC moment as naive Kyiv wall-clock time."""
+    return t.tz_convert("Europe/Kyiv").tz_localize(None)
+
+
+def _table(rows, names):
+    """One moment's forecast table: each region's state at T and, for a region clear then, P(a new alert starts within
+    1/3/6 h)."""
+    import pandas as pd
+    from alerts.features import HOURS
+    return pd.DataFrame({"now": rows.level.map({"red": "🔴 alert", "yellow": "🟡 alert"}).fillna("clear").to_numpy(),
+                         **{f"{h} h": (rows[f"p{h}"] * 100).map("{:.0f}%".format).where(rows.under == 0, "").to_numpy()
+                            for h in HOURS}}, index=pd.Index(rows.obl.map(names), name="region")).sort_index()
+
+
 def predict(args):
     """Offline: every region at the moment T where the saved history ends (no download, no training); print, then log."""
     import hashlib
-    import json
     import pandas as pd
     from alerts import data as D, live
-    from alerts.features import HOURS
     from alerts.model import Forecaster
     T, made = D.api_asof(OBLAST_UIDS), pd.Timestamp.now(tz="UTC").floor("s")
     rows = live.forecast(D.history(D.load_map(), D.load_api()), T, Forecaster.load(MODEL)).assign(
         made_at=made, model_sha256=hashlib.sha256(MODEL.read_bytes()).hexdigest())
-    names = {int(x["regionId"]): x["regionName"] for x in json.loads(D.REGIONS.read_text())["states"]}
-    table = pd.DataFrame({"now": rows.level.map({"red": "🔴 alert", "yellow": "🟡 alert"}).fillna("clear").to_numpy(),
-                          **{f"{h} h": (rows[f"p{h}"] * 100).map("{:.0f}%".format).where(rows.under == 0, "").to_numpy()
-                             for h in HOURS}}, index=pd.Index(rows.obl.map(names), name="region")).sort_index()
     print(f"Data as of {T.tz_convert('Europe/Kyiv'):%Y-%m-%d %H:%M} Kyiv ({T:%H:%M} UTC), "
           f"{(made - T) / pd.Timedelta('1h'):.1f} h ago. P(a new alert starts within 1/3/6 h) for regions clear then.\n")
-    print(md(table))
+    print(md(_table(rows, _names())))
     print(f"\n{'logged to' if live.log(rows, LOG) else 'this moment is already in'} {LOG.relative_to(ROOT)}")
 
 
@@ -301,18 +317,17 @@ def score(args):
           "Brier score of the logged forecasts and `model_recomputed` that of the forecasts on the recomputed features.")
 
 
-def history(args):
-    """Offline: alert load over time and the yellow/red levels since the reform, up to the map cutoff; write
-    results/history_report.md."""
-    import json
+def _history():
+    """The history analytics up to the map cutoff, nothing from the holdout: the first full Kyiv day `lo`, the daily
+    table `d`, the weekly table, `per` (per region and 'all', for the year and 28 days before and after the level
+    reform), and the per-region tables around the reform (`reg`) and of the levels since the splice (`lev`)."""
     import pandas as pd
     from alerts import data as D
     from alerts.features import OBLASTS
     h = D.history(D.load_map(), D.load_api())
     lo = (h.start.min().tz_convert("Europe/Kyiv").normalize() + pd.Timedelta("1D")).tz_convert("UTC")  # first full day
     d = D.daily(h[h.start < D.MAP_CUTOFF], lo, D.MAP_CUTOFF, OBLASTS)  # nothing from the holdout
-    kyiv = lambda t: t.tz_convert("Europe/Kyiv").tz_localize(None)
-    names = {int(x["regionId"]): x["regionName"] for x in json.loads(D.REGIONS.read_text())["states"]}
+    names = _names()
 
     def load(g):
         known = g[g.red.notna()]
@@ -320,28 +335,12 @@ def history(args):
                           "starts/region-day": g.starts.sum() / (g.minutes.sum() / 1440),
                           "red share": known.red.sum() / known.alert.sum() if len(known) else float("nan")})
 
-    out = [f"# History report\n\nGenerated offline by `python main.py history`. Kyiv calendar days from {kyiv(lo):%Y-%m-%d} "
-           f"to the map cutoff, {kyiv(D.MAP_CUTOFF):%Y-%m-%d %H:%M} Kyiv (that day is partial). Nothing after it is used: "
-           "it is the untouched holdout (step 7).",
-           "\nA region is under alert when some part of it is: the union of oblast- and raion-level AIR alerts, 23 oblasts "
-           "and Kyiv City. Overlapping records count once; a restart after an all-clear is a new start. Sources: the map "
-           f"snapshot for alerts that start before the splice ({kyiv(D.SPLICE):%Y-%m-%d %H:%M} Kyiv), alerts.in.ua from it "
-           "(seam check in `data_report.md`).",
-           "\n**Red share** = minutes under a red record / minutes under alert, from the splice on: the map has no levels, "
-           "so the first days of the reform (09-07 to 09-11) are unlabelled. History keeps each record's final level "
-           "(yellow → red is an in-place update), so a record that turned red counts as red for its whole length: the red "
-           "share is an upper bound."]
     # 1. load over time
     week = d.assign(week=d.day - pd.to_timedelta(d.day.dt.dayofweek, "D")).groupby("week")[d.columns].apply(load)
     week.index = week.index.strftime("%Y-%m-%d")
-    week["note"] = pd.Series({"2025-12-15": "raion-level alerting", f"{kyiv(D.REFORM):%Y-%m-%d}": "yellow/red levels"})
-    out += ["\n## Load over time: all 24 regions, per Kyiv week (Mon–Sun)\n",
-            md(week.rename_axis("week").round(3).fillna(""), "{:.3f}"),
-            "\n`share under alert`: the share of time with the region under alert, averaged over the 24 regions. "
-            "The rows marked in `note` are markers, not causes: the rise began in late August, before the level reform "
-            "(feasibility.md)."]
+    week["note"] = pd.Series({"2025-12-15": "raion-level alerting", f"{_kyiv(D.REFORM):%Y-%m-%d}": "yellow/red levels"})
     # 2. per region, around the reform
-    window = lambda a, b: d[(d.day >= kyiv(a)) & (d.day < kyiv(b))]
+    window = lambda a, b: d[(d.day >= _kyiv(a)) & (d.day < _kyiv(b))]
     four = pd.Timedelta("28D")
     parts = {"year": d, "before": window(D.REFORM - four, D.REFORM), "after": window(D.REFORM, D.REFORM + four)}
     per = {k: pd.concat([v.groupby("obl")[d.columns].apply(load), load(v).to_frame("all").T]) for k, v in parts.items()}
@@ -352,11 +351,6 @@ def history(args):
     reg["share, after - before"] = reg["share, after"] - reg["share, before"]  # a ratio explodes on near-zero western bases
     reg.index = [names.get(o, o) for o in reg.index]
     reg = pd.concat([reg.drop("all").sort_index(), reg.loc[["all"]]])
-    out += [f"\n## Per region: 28 days before and after the level reform ({kyiv(D.REFORM):%Y-%m-%d})\n",
-            f"Before: {kyiv(D.REFORM - four):%Y-%m-%d} to {kyiv(D.REFORM) - pd.Timedelta('1D'):%Y-%m-%d}; after: "
-            f"{kyiv(D.REFORM):%Y-%m-%d} to {kyiv(D.REFORM + four) - pd.Timedelta('1D'):%Y-%m-%d}; year: the whole span "
-            "above. A description, not the reform's effect.\n",
-            md(reg.rename_axis("region"), "{:.3f}")]
     # 3. levels since the splice
     lv = d[d.red.notna()]
     lev = pd.concat([lv.groupby("obl")[["alert", "red"]].sum(), lv[["alert", "red"]].sum().to_frame("all").T])
@@ -364,8 +358,39 @@ def history(args):
                         "red share": lev.red / lev.alert})
     lev.index = [names.get(o, o) for o in lev.index]
     lev = pd.concat([lev.drop("all").sort_index(), lev.loc[["all"]]])
-    out += [f"\n## Yellow/red levels, {lv.day.min():%Y-%m-%d} to the map cutoff\n", md(lev.rename_axis("region"), "{:.3f}"),
-            "\nThe weekly red share is in the first table."]
+    return lo, d, week, per, reg, lev
+
+
+def history(args):
+    """Offline: alert load over time and the yellow/red levels since the reform, up to the map cutoff; write
+    results/history_report.md."""
+    import pandas as pd
+    from alerts import data as D
+    lo, d, week, per, reg, lev = _history()
+    four = pd.Timedelta("28D")  # the reform windows of _history
+    out = [f"# History report\n\nGenerated offline by `python main.py history`. Kyiv calendar days from {_kyiv(lo):%Y-%m-%d} "
+           f"to the map cutoff, {_kyiv(D.MAP_CUTOFF):%Y-%m-%d %H:%M} Kyiv (that day is partial). Nothing after it is used: "
+           "it is the untouched holdout (step 7).",
+           "\nA region is under alert when some part of it is: the union of oblast- and raion-level AIR alerts, 23 oblasts "
+           "and Kyiv City. Overlapping records count once; a restart after an all-clear is a new start. Sources: the map "
+           f"snapshot for alerts that start before the splice ({_kyiv(D.SPLICE):%Y-%m-%d %H:%M} Kyiv), alerts.in.ua from it "
+           "(seam check in `data_report.md`).",
+           "\n**Red share** = minutes under a red record / minutes under alert, from the splice on: the map has no levels, "
+           "so the first days of the reform (09-07 to 09-11) are unlabelled. History keeps each record's final level "
+           "(yellow → red is an in-place update), so a record that turned red counts as red for its whole length: the red "
+           "share is an upper bound."]
+    out += ["\n## Load over time: all 24 regions, per Kyiv week (Mon–Sun)\n",
+            md(week.rename_axis("week").round(3).fillna(""), "{:.3f}"),
+            "\n`share under alert`: the share of time with the region under alert, averaged over the 24 regions. "
+            "The rows marked in `note` are markers, not causes: the rise began in late August, before the level reform "
+            "(feasibility.md)."]
+    out += [f"\n## Per region: 28 days before and after the level reform ({_kyiv(D.REFORM):%Y-%m-%d})\n",
+            f"Before: {_kyiv(D.REFORM - four):%Y-%m-%d} to {_kyiv(D.REFORM) - pd.Timedelta('1D'):%Y-%m-%d}; after: "
+            f"{_kyiv(D.REFORM):%Y-%m-%d} to {_kyiv(D.REFORM + four) - pd.Timedelta('1D'):%Y-%m-%d}; year: the whole span "
+            "above. A description, not the reform's effect.\n",
+            md(reg.rename_axis("region"), "{:.3f}")]
+    out += [f"\n## Yellow/red levels, {d[d.red.notna()].day.min():%Y-%m-%d} to the map cutoff\n",
+            md(lev.rename_axis("region"), "{:.3f}"), "\nThe weekly red share is in the first table."]
     rep = ROOT / "results/history_report.md"
     rep.write_text("\n".join(out) + "\n")
     print(f"share under alert, all regions: year {per['year'].loc['all', 'share under alert']:.3f}; 28 d before / after the "

@@ -767,7 +767,10 @@ def outlook():
     scores = {h: Scores(b[b.hours == h].rename(columns={"y": f"y{h}", "clim28": f"clim28_{h}", "recent7": f"recent7_{h}"}),
                         h) for h in HOURS}
     thin = {names[o] for s in scores.values() for o, n in s.per_oblast("logistic").n.items() if n < 100}
-    scored = live.summary(live.score(log, D.history(D.load_map(), D.load_api()), asof, Forecaster.load(MODEL)))
+    records = D.history(D.load_map(), D.load_api())
+    scored = live.summary(live.score(log, records, asof, Forecaster.load(MODEL)))
+    v2 = ROOT / "results/v2/summary.json"
+    v2 = json.loads(v2.read_text()) if v2.exists() else None  # the v2 models (Decision 12), once `retrain` has run
     # history: each week's share of time under a red, a yellow or an unlabelled alert (no level before the splice)
     lo, d, week, per, reg, lev = _history()
     w = d.assign(week=d.day - pd.to_timedelta(d.day.dt.dayofweek, "D"), red=d.red.fillna(0),
@@ -784,15 +787,26 @@ def outlook():
             f"({T:%H:%M} UTC), where the saved alerts.in.ua pull ends; the forecast was {when}.</p></header>"]
 
     n_red, n_yellow = int((rows.level == "red").sum()), int((rows.level == "yellow").sum())
-    now = _table(rows, names)
-    now["quality"] = ["⚠ not verified" if n in thin else "" for n in now.index]
+    def panel(r):
+        t = _table(r, names)
+        t["quality"] = ["⚠ not verified" if n in thin else "" for n in t.index]
+        return P.tiles(r, names) + tab(t)
+
+    forecast = panel(rows)
+    if v2:  # one button per model; a v2 model forecasts T from the saved data now, a replay
+        forecast = P.switch({"v1 logistic (registered)": forecast, **{
+            f"v2 {label}": panel(live.forecast(records, T, Forecaster.load(ROOT / f"models/v2/{family}.joblib")))
+            for family, label in FAMILIES.items()}})
     now_part = ["<h2>Now and next hours</h2>",
                 f"<p>At T, {n_red + n_yellow} of 24 regions were under alert ({n_red} red, {n_yellow} yellow). For each "
                 "region clear at T: the probability that a new alert starts within 1, 3 or 6 h; the tiles show 3 h. A "
                 "region under alert gets no probability: the model forecasts a new start for a clear region only.</p>",
                 key(("red", "red: missiles or a massed strike"), ("yellow", "yellow: drones"),
                     ("clear", "clear: P(a new alert within 3 h)")),
-                P.tiles(rows, names), tab(now),
+                *(['<p class="small">Choose the model with the buttons. v1 is the registered model; its forecast was '
+                   "logged at T. The three v2 models were retrained for the highest F1 and forecast the same T from the "
+                   "saved data when this page was made, a replay. Their quality is under Model quality.</p>"] if v2 else []),
+                forecast,
                 '<p class="small">⚠ not verified: fewer than 100 clear moments of this region in the benchmark, so the '
                 "model's quality there is unknown.</p>"]
 
@@ -848,6 +862,20 @@ def outlook():
              + ("Nothing scored yet: no logged window closes inside the saved data. The first live score is step 7.</p>"
                 if scored.empty else "Scored windows, per horizon and kind:</p>" + P.scored(scored) +
                 f'<p class="small">{live.NOTE.replace("`", "")}</p>'))
+    v2_part = []
+    if v2:
+        f1 = pd.DataFrame(v2["pooled"]).query("period != 'choose'").pivot_table(
+            index="forecast", columns=["period", "horizon"], values="f1")
+        f1 = f1.loc[["v1", *FAMILIES, "clim28", "recent7"]].rename(
+            index={"v1": "v1 logistic", **{k: f"v2 {v}" for k, v in FAMILIES.items()}})
+        f1.columns = [f"{h} h, {period}" for period, h in f1.columns]
+        v2_part = ["<h3>v2: retrained for F1</h3>",
+                   "<p>The three model families retrained with a search over their parameters for the highest F1 on the "
+                   "CHOOSE weeks (PROCESS_LOG, Decision 12); each alarm threshold was set there too. F1 of the alarm "
+                   "p ≥ threshold, pooled over the 24 regions. The benchmark and the holdout were not used for tuning, but "
+                   "both had been seen before, so these are checks, not independent tests. The untouched check is the data "
+                   f"after {_kyiv(pd.Timestamp(v2['end'])):%Y-%m-%d %H:%M} Kyiv, scored after the submission. More in "
+                   "results/v2/report.md.</p>", tab(f1.rename_axis("F1"))]
     quality_part = ["<h2>Model quality</h2>",
                     "<p>Calibrated logistic regression, chosen from five candidates on earlier weeks and scored once on "
                     f"the historical benchmark: {_kyiv(BENCHMARK[0]):%Y-%m-%d} to the map cutoff, four weekly blocks, each "
@@ -867,11 +895,12 @@ def outlook():
                     "(y). Points on the diagonal are calibrated.</p>",
                     P.reliability(rel), key(*((f"h{h}", f"{h} h") for h in HOURS)),
                     f"<details><summary>Reliability table</summary>{tab(bins)}</details>",
-                    "<h3>Live log</h3>", lived]
+                    *v2_part, "<h3>Live log</h3>", lived]
 
     foot = ["<footer><p class=\"small\">Sources: the official map snapshot (map.ukrainealarm.com) for alerts that start "
             f"before {_kyiv(D.SPLICE):%Y-%m-%d %H:%M} Kyiv, alerts.in.ua from then on (seam check: data_report.md). "
-            f"Model: models/logistic.joblib, SHA-256 {rows.model_sha256.iloc[0]}. Reports: "
+            f"Model: models/logistic.joblib, SHA-256 {rows.model_sha256.iloc[0]}"
+            + ("; v2 models: models/v2/{logistic,gbm,catboost}.joblib (v2/report.md)" if v2 else "") + ". Reports: "
             '<a href="history_report.md">history</a>, <a href="benchmark_report.md">benchmark</a>, <a href="holdout_report.md">holdout</a>, '
             '<a href="data_report.md">data</a>. Regenerate offline: <code>python main.py predict</code>, then '
             "<code>python main.py page</code>; <code>python main.py fetch</code> pulls newer data first.</p></footer>"]

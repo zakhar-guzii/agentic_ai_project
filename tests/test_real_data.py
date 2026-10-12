@@ -128,6 +128,8 @@ def test_the_outlook_page_is_self_contained_and_draws_no_week_after_the_map_cuto
     # ... and so is T, 10-11: the last week must end at the cutoff, Monday 00:00 Kyiv + 5 d 22:03 = 5.919 days
     days = float(re.search(r"<th>2026-10-05</th>\s*<td>([\d.]+)</td>", page).group(1))
     assert days == round((D.MAP_CUTOFF - pd.Timestamp("2026-10-05", tz="Europe/Kyiv")) / pd.Timedelta("1D"), 3)
+    if (ROOT / "results/v2/summary.json").exists():  # v2 (Decision 12): a button per model, each panel with every region
+        assert page.count('type="radio"') == 4 and all(page.count(names[o]) >= 8 for o in OBLASTS)
 
 
 @pytest.mark.skipif(not (D.API_DIR / "20261011T1247Z").exists(), reason="the frozen step-3 pull is missing")
